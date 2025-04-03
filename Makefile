@@ -4,7 +4,7 @@
 
 # Author: Tim Fischer <fischeti@iis.ee.ethz.ch>
 
-BENDER 		?= bender
+BENDER 		?= ./install/bender/bender
 VSIM 		  ?= vsim
 REGGEN 		?= $(shell ${BENDER} path register_interface)/vendor/lowrisc_opentitan/util/regtool.py
 WORK 		  ?= work

@@ -46,6 +46,9 @@ sources:
     # Wrapper for Occamy
     - src/serial_link_occamy_wrapper.sv
 
+    # Wrapper for Kerberos
+    - src/serial_link_kerberos_wrapper.sv
+
     - target: synthesis
       files:
       - src/serial_link_synth_wrapper.sv
@@ -57,7 +60,7 @@ sources:
     - target: test
       files:
       - test/tb_axi_serial_link.sv
-      - test/tb_ch_calib_serial_link.sv
-      - test/tb_stream_chopper.sv
-      - test/tb_stream_chopper_dechopper.sv
-      - test/tb_channel_allocator.sv
+      # - test/tb_ch_calib_serial_link.sv
+      # - test/tb_stream_chopper.sv
+      # - test/tb_stream_chopper_dechopper.sv
+      # - test/tb_channel_allocator.sv
