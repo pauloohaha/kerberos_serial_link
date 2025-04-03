@@ -63,4 +63,19 @@ package serial_link_pkg;
     return max_value;
   endfunction
 
+  /*Serial Link ctrl reg define*/
+
+  `include "register_interface/typedef.svh"
+
+  localparam int unsigned SerialLinkRegAddrWidth    = 32;
+  localparam int unsigned SerialLinkRegDataWidth    = 32;
+  localparam int unsigned SerialLinkRegStrbWidth    = SerialLinkRegDataWidth / 8;
+
+  // RegBus types for typedefs
+  typedef logic [SerialLinkRegAddrWidth-1:0]  serial_link_cfg_addr_t;
+  typedef logic [SerialLinkRegDataWidth-1:0]  serial_link_cfg_data_t;
+  typedef logic [SerialLinkRegStrbWidth-1:0]  serial_link_cfg_strb_t;
+
+  `REG_BUS_TYPEDEF_ALL(serial_link_cfg, serial_link_cfg_addr_t, serial_link_cfg_data_t, serial_link_cfg_strb_t)
+
 endpackage : serial_link_pkg
