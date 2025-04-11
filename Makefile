@@ -4,7 +4,7 @@
 
 # Author: Tim Fischer <fischeti@iis.ee.ethz.ch>
 
-BENDER 		?= ./install/bender/bender
+BENDER 		?= ./bender
 VSIM 		  ?= vsim
 REGGEN 		?= $(shell ${BENDER} path register_interface)/vendor/lowrisc_opentitan/util/regtool.py
 WORK 		  ?= work
@@ -22,7 +22,11 @@ run: run_questa
 # General
 # --------------
 
-.PHONY: clean_bender
+.PHONY: clean_bender bender
+
+bender:
+	curl --proto '=https'  \
+	--tlsv1.2 https://pulp-platform.github.io/bender/init -sSf | sh -s
 
 Bender.lock:
 	$(BENDER) update
