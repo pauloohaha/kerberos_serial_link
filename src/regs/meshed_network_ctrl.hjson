@@ -1,0 +1,194 @@
+// Author: Pu Deng <piaodeng@stanford.edu>
+
+{
+  name: "meshed_network_Ctrl_regs"
+  clock_primary: "clk_i"
+  reset_primary: "rst_ni"
+  bus_interfaces: [
+      { protocol: "reg_iface", direction: "device"}
+  ]
+  regwidth: "64",
+  registers: [
+    {
+      name: "MESHED_NETWORK_ID",
+      desc: "id of the router",
+      swaccess: "rw",
+      hwaccess: "hro",
+      fields: [
+        {
+          bits: "3:0",
+          name: "xy_id",
+          desc: "id in the normal xy coordinate"
+          resval: "0"
+        },
+        {
+          bits: "7:4",
+          name: "ring_id",
+          desc: "id in the ring on mesh mapping"
+          resval: "0"
+        },
+        {
+          bits: "9:8",
+          name: "ring_up_port",
+          desc: "direction for the up port on the ring"
+          resval: "0"
+        },
+        {
+          bits: "11:10",
+          name: "ring_down_port",
+          desc: "direction for the down port on the ring"
+          resval: "0"
+        }
+      ]
+    },
+    {
+      name: "MESHED_NETWORK_DATA_FETCHER_DATA",
+      desc: "addr and len for fetching data",
+      swaccess: "rw",
+      hwaccess: "hro",
+      fields: [
+        {
+          bits: "31:0",
+          name: "fetcher_start_addr",
+          desc: "starting address for fetching the data"
+          resval: "0"
+        },
+        {
+          bits: "63:32",
+          name: "fetcher_len",
+          desc: "length of the package in bytes"
+          resval: "0"
+        }
+      ]
+    },
+    {
+      name: "MESHED_NETWORK_ROM_CTRL",
+      desc: "ring on mesh multicasting ctrl",
+      swaccess: "rw",
+      hwaccess: "hro",
+      fields: [
+        {
+          bits: "0",
+          name: "rom_en",
+          desc: "enable the ring on mesh traffic"
+          resval: "0"
+        },
+        {
+          bits: "1",
+          name: "traffic_dir",
+          desc: "1 for up going traffic, 0 for down going traffic"
+          resval: "0"
+        },
+        {
+          bits: "17:2",
+          name: "dst_mask",
+          desc: "mask for the multi-casting traffic"
+          resval: "0"
+        }
+      ]
+    },
+    {
+      name: "MESHED_NETWORK_DATA_RECV_DATA",
+      desc: "addr and len for buffering receiving data",
+      swaccess: "rw",
+      hwaccess: "hro",
+      fields: [
+        {
+          bits: "31:0",
+          name: "recv_addr",
+          desc: "addr for buffering receiving data"
+          resval: "0"
+        },
+        {
+          bits: "63:32",
+          name: "recv_len",
+          desc: "max len for buffering receiving data"
+          resval: "0"
+        }
+      ]
+    },
+    {
+      name: "MESHED_NETWORK_CTRL",
+      desc: "router ctrl",
+      swaccess: "rw",
+      hwaccess: "hrw",
+      fields: [
+        {
+          bits: "0",
+          name: "send_start",
+          desc: "trigger data fetcher to start packet"
+          resval: "0"
+        },
+        {
+          bits: "4:1",
+          name: "dst_chip",
+          desc: "the final destination of the message"
+          resval: "0"
+        },
+        {
+          bits: "5",
+          name: "recv_rdy",
+          desc: "ready for receiving data"
+          resval: "0"
+        },
+        {
+          bits: "6",
+          name: "reset_writer",
+          desc: "reset writer for the next recv"
+          resval: "0"
+        }
+      ]
+    },
+    {
+      name: "MESHED_NETWORK_STATUS",
+      desc: "meshed network status",
+      swaccess: "ro",
+      hwaccess: "hrw",
+      fields: [
+        {
+          bits: "0",
+          name: "send_rdy",
+          desc: "ready for sending data"
+          resval: "0"
+        },
+        {
+          bits: "1",
+          name: "send_done",
+          desc: "ready for sending data"
+          resval: "0"
+        },
+        {
+          bits: "5:2",
+          name: "recv_src_id",
+          desc: "xy id of the source chip"
+          resval: "0"
+        },{
+          bits: "6",
+          name: "recv_done",
+          desc: "received one full packet"
+          resval: "0"
+        },{
+          bits: "7",
+          name: "recv_overflow",
+          desc: "receive buffer overflow error"
+          resval: "0"
+        },{
+          bits: "8",
+          name: "data_requester_state",
+          desc: "data requester's state"
+          resval: "0"
+        },{
+          bits: "9",
+          name: "data_feeder_state",
+          desc: "data feeder's state"
+          resval: "0"
+        },{
+          bits: "11:10",
+          name: "data_writer_state",
+          desc: "data writer's state"
+          resval: "0"
+        }
+      ]
+    }
+  ]
+}

@@ -10,7 +10,7 @@
 
 module meshed_serial_link #(
   // The number of physical chnannelsc per direction
-  parameter int NumChannels       = 1,
+  parameter int NumChannels       = 5,
   // The number of lanes per channel
   parameter int NumLanes          = 8,
   // Whether to enable DDR mode
@@ -24,7 +24,11 @@ module meshed_serial_link #(
   // The depth of the raw mode FIFO
   parameter int RawModeFifoDepth  = 8,
   // width of the AXIS payload data
-  parameter int AXISdataWidth = 256,
+  parameter int AXIdataWidth = 256,
+  // the width of the id field used to index chips
+  parameter int ChipIdWidth = 4,
+  // number of virtual channels for the ring on mesh router
+  parameter int unsigned NumVirtChannels  = 0,
   parameter type axi_req_t  = logic,
   parameter type axi_rsp_t  = logic,
   parameter type aw_chan_t  = logic,
@@ -33,13 +37,20 @@ module meshed_serial_link #(
   parameter type w_chan_t   = logic,
   parameter type b_chan_t   = logic,
   parameter type cfg_req_t  = logic,
-  parameter type cfg_rsp_t  = logic,
-  parameter type hw2reg_t   = logic,
-  parameter type reg2hw_t   = logic
+  parameter type cfg_rsp_t  = logic
 ) (
     // clock
     input  logic                          clk_i,
     input  logic                          rst_ni,
+
+    // sl clock
+    input  logic                          clk_sl_i,
+    input  logic                          rst_sl_ni,
+    
+    // reg clock
+    input  logic                          clk_reg_i,
+    input  logic                          rst_reg_ni,
+    input  logic                          testmode_i,
 
     // AXI data req
     output axi_req_t                      axi_req_o,
@@ -56,13 +67,19 @@ module meshed_serial_link #(
     output logic [3:0][NumChannels-1:0][NumLanes-1:0] ddr_o,
 
     // AXI isolation signals (in/out), if not used tie to 0
-    input  logic [1:0]                isolated_i,
-    output logic [1:0]                isolate_o,
+    input  logic [3:0][1:0]                isolated_i,
+    output logic [3:0][1:0]                isolate_o,
     // Clock gate register
-    output logic                      clk_ena_o,
+    output logic [3:0]                clk_ena_o,
     // synch-reset register
-    output logic                      reset_no
+    output logic [3:0]                reset_no
 );
+
+  // meshed network defs
+  localparam logic [31:0] linkCtrlRegLen = serial_link_pkg::linkCtrlRegLen;
+  localparam int            linkCtrlRegSelOffset = 12;
+
+  // link defs
 
   localparam int unsigned NumBitsPerCycle = NumLanes * (1 + EnDdr);
 
@@ -71,9 +88,11 @@ module meshed_serial_link #(
 
   // Payload in message passing protocol:
   // 1) data
-  // 2) credit
+  // 2) virtual channel id for the router
+  // 3) credit
   typedef struct packed {
-    logic [AXISdataWidth-1:0] axi_ch;
+    logic [AXIdataWidth-1:0] data;
+    logic [$clog2(NumVirtChannels)-1:0] virt_channel_id;
     credit_t credit;
   } payload_t;
 
@@ -91,7 +110,7 @@ module meshed_serial_link #(
   typedef logic [StreamDataBytes-1:0] tkeep_t;
   typedef logic tlast_t;
   typedef logic tid_t;
-  typedef logic tdest_t;
+  typedef logic [ChipIdWidth-1:0] tdest_t; //4bits to indicate the id of destination chip
   typedef logic tuser_t;
   typedef logic tready_t;
   `AXIS_TYPEDEF_ALL(axis, tdata_t, tstrb_t, tkeep_t, tlast_t, tid_t, tdest_t, tuser_t, tready_t)
@@ -103,15 +122,13 @@ module meshed_serial_link #(
   axis_rsp_t  [3:0] axis_out_rsp;
   axis_rsp_t  [3:0] axis_in_rsp;
 
-  cfg_req_t cfg_req;
-  cfg_rsp_t cfg_rsp;
-
-  reg2hw_t reg2hw;
-  hw2reg_t hw2reg;
+  // 4 way ctrl registers plus 1 way ctrl registers
+  cfg_req_t [4:0] splited_cfg_req;
+  cfg_rsp_t [4:0] splited_cfg_rsp;
 
   phy_data_t [3:0][NumChannels-1:0]  data_link2alloc_data_out;
   logic [3:0][NumChannels-1:0]       data_link2alloc_data_out_valid;
-  logic                         alloc2data_link_data_out_ready;
+  logic [3:0]                        alloc2data_link_data_out_ready;
 
   phy_data_t [3:0][NumChannels-1:0]  alloc2data_link_data_in;
   logic [3:0][NumChannels-1:0]       alloc2data_link_data_in_valid;
@@ -125,35 +142,70 @@ module meshed_serial_link #(
   logic [3:0][NumChannels-1:0]       phy2alloc_data_in_valid;
   logic [3:0][NumChannels-1:0]       alloc2phy_data_in_ready;
 
+  // Ctrl reg demux
+  reg_demux # (
+    .NoPorts    (5          ),
+    .req_t      (cfg_req_t  ),
+    .rsp_t      (cfg_rsp_t  )
+  ) i_meshed_link_ctrl_reg_demux (
+    .clk_i        ( clk_i                 ),
+    .rst_ni       ( rst_ni                ),
+    .in_select_i  ( cfg_req_i.addr[linkCtrlRegSelOffset+2:linkCtrlRegSelOffset]),
+    .in_req_i     ( cfg_req_i             ),
+    .in_rsp_o     ( cfg_rsp_o             ),
+    .out_req_o    ( splited_cfg_req       ),
+    .out_rsp_i    ( splited_cfg_rsp       )
+  );
+
   ///////////////////////
   //   NETWORK LAYER   //
   ///////////////////////
 
-  // TODO: implemented meshed network 
+  meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_reg2hw_t network_ctrl_regs_reg2hw;
+  meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_hw2reg_t network_ctrl_regs_hw2reg;
+
+  meshed_network_ctrl_regs_reg_top #(
+    .reg_req_t (cfg_req_t),
+    .reg_rsp_t (cfg_rsp_t)
+  ) i_network_ctrl_reg_top (
+    .clk_i      ( clk_i                    ),
+    .rst_ni     ( rst_ni                   ),
+    .reg_req_i  ( splited_cfg_req[4]       ),
+    .reg_rsp_o  ( splited_cfg_rsp[4]       ),
+    .reg2hw     ( network_ctrl_regs_reg2hw ),
+    .hw2reg     ( network_ctrl_regs_hw2reg ),
+    .devmode_i  ( testmode_i               )
+  );
 
   meshed_serial_link_network #(
-
+    .axi_req_t  ( axi_req_t   ),
+    .axi_rsp_t  ( axi_rsp_t   ),
+    .reg2hw_t   ( meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_reg2hw_t ),
+    .hw2reg_t   ( meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_hw2reg_t ),
+    .axis_req_t ( axis_req_t  ),
+    .axis_rsp_t ( axis_rsp_t  )
   ) i_meshed_serial_link_network (
-    .clk_i                    ( clk_i         ),
-    .rst_ni                   ( rst_ni        ),
-    .axi_req_o                ( axi_req_o     ),
-    .axi_rsp_i                ( axi_rsp_i     ),
-    .reg2hw_i                 ( reg2hw        ),
-    .hw2reg_o                 ( hw2reg        ),
-    .axis_out_req_o           ( axis_out_req  ),
-    .axis_out_rsp_i           ( axis_out_rsp  ),
-    .axis_in_req_i            ( axis_in_req   ),
-    .axis_in_rsp_o            ( axis_in_rsp   )
+    .clk_i                    ( clk_i                     ),
+    .rst_ni                   ( rst_ni                    ),
+    .axi_req_o                ( axi_req_o                 ),
+    .axi_rsp_i                ( axi_rsp_i                 ),
+    .reg2hw_i                 ( network_ctrl_regs_reg2hw  ),
+    .hw2reg_o                 ( network_ctrl_regs_hw2reg  ),
+    .axis_out_req_o           ( axis_out_req              ),
+    .axis_out_rsp_i           ( axis_out_rsp              ),
+    .axis_in_req_i            ( axis_in_req               ),
+    .axis_in_rsp_o            ( axis_in_rsp               )
   );
 
   // 4 way links
   for (genvar i = 0; i < 4; i++) begin: gen_4_way_data_serial_link
 
+    serial_link_reg_pkg::serial_link_reg2hw_t  reg2hw;
+    serial_link_reg_pkg::serial_link_hw2reg_t  hw2reg;
+
     /////////////////////////
     //   DATA LINK LAYER   //
     /////////////////////////
-
-    //TODO: fix reg connections for each way
 
     logic cfg_flow_control_fifo_clear;
     logic cfg_raw_mode_out_data_fifo_clear;
@@ -204,8 +256,6 @@ module meshed_serial_link #(
     ///////////////////////
     // CHANNEL ALLOCATOR //
     ///////////////////////
-
-    //TODO: fix reg connections for each way
 
     logic cfg_tx_clear, cfg_rx_clear;
     logic cfg_tx_flush_trigger;
@@ -258,8 +308,6 @@ module meshed_serial_link #(
     //   PHYSICAL LAYER   //
     ////////////////////////
 
-    //TODO: fix reg connections for each way
-
     for (genvar j = 0; j < NumChannels; j++) begin : gen_phy_channels
       serial_link_physical #(
         .NumLanes         ( NumLanes          ),
@@ -270,9 +318,9 @@ module meshed_serial_link #(
       ) i_serial_link_physical (
         .clk_i             ( clk_sl_i                        ),
         .rst_ni            ( rst_sl_ni                       ),
-        .clk_div_i         ( reg2hw.tx_phy_clk_div[j].q      ),
-        .clk_shift_start_i ( reg2hw.tx_phy_clk_start[j].q    ),
-        .clk_shift_end_i   ( reg2hw.tx_phy_clk_end[j].q      ),
+        .clk_div_i         ( reg2hw.tx_phy_clk_div[i*NumChannels+j].q      ),
+        .clk_shift_start_i ( reg2hw.tx_phy_clk_start[i*NumChannels+j].q    ),
+        .clk_shift_end_i   ( reg2hw.tx_phy_clk_end[i*NumChannels+j].q      ),
         .ddr_rcv_clk_i     ( ddr_rcv_clk_i[i][j]             ),
         .ddr_rcv_clk_o     ( ddr_rcv_clk_o[i][j]             ),
         .data_out_i        ( alloc2phy_data_out[i][j]        ),
@@ -286,57 +334,61 @@ module meshed_serial_link #(
       );
     end
 
-  end
+  
 
-  /////////////////////////////////
-  //   CONFIGURATION REGISTERS   //
-  /////////////////////////////////
+    /////////////////////////////////
+    //   CONFIGURATION REGISTERS   //
+    /////////////////////////////////
 
-  if (!NoRegCdc) begin : gen_reg_cdc
-    reg_cdc #(
-      .req_t  ( cfg_req_t ),
-      .rsp_t  ( cfg_rsp_t )
-    ) i_cdc_cfg (
-      .src_clk_i  ( clk_reg_i   ),
-      .src_rst_ni ( rst_reg_ni  ),
-      .src_req_i  ( cfg_req_i   ),
-      .src_rsp_o  ( cfg_rsp_o   ),
+    cfg_req_t cfg_req;
+    cfg_rsp_t cfg_rsp;
 
-      .dst_clk_i  ( clk_i       ),
-      .dst_rst_ni ( rst_ni      ),
-      .dst_req_o  ( cfg_req     ),
-      .dst_rsp_i  ( cfg_rsp     )
+    if (!NoRegCdc) begin : gen_reg_cdc
+      reg_cdc #(
+        .req_t  ( cfg_req_t ),
+        .rsp_t  ( cfg_rsp_t )
+      ) i_cdc_cfg (
+        .src_clk_i  ( clk_reg_i            ),
+        .src_rst_ni ( rst_reg_ni           ),
+        .src_req_i  ( splited_cfg_req[i]   ),
+        .src_rsp_o  ( splited_cfg_rsp[i]   ),
+
+        .dst_clk_i  ( clk_i                ),
+        .dst_rst_ni ( rst_ni               ),
+        .dst_req_o  ( cfg_req              ),
+        .dst_rsp_i  ( cfg_rsp              )
+      );
+    end else begin : gen_no_reg_cdc
+      assign cfg_req = splited_cfg_req[i];
+      assign cfg_rsp_o = splited_cfg_rsp[i];
+    end
+
+
+    serial_link_reg_top #(
+      .reg_req_t (cfg_req_t),
+      .reg_rsp_t (cfg_rsp_t)
+    ) i_serial_link_reg_top (
+      .clk_i      ( clk_i       ),
+      .rst_ni     ( rst_ni      ),
+      .reg_req_i  ( cfg_req     ),
+      .reg_rsp_o  ( cfg_rsp     ),
+      .reg2hw     ( reg2hw      ),
+      .hw2reg     ( hw2reg      ),
+      .devmode_i  ( testmode_i  )
     );
-  end else begin : gen_no_reg_cdc
-    assign cfg_req = cfg_req_i;
-    assign cfg_rsp_o = cfg_rsp;
+
+    assign clk_ena_o[i] = reg2hw.ctrl.clk_ena.q;
+    assign reset_no[i] = reg2hw.ctrl.reset_n.q;
+    assign isolate_o[i] = {reg2hw.ctrl.axi_out_isolate.q, reg2hw.ctrl.axi_in_isolate.q};
+    assign hw2reg.isolated.axi_in.d = isolated_i[i][0];
+    assign hw2reg.isolated.axi_out.d = isolated_i[i][1];
+
+    ////////////////////
+    //   ASSERTIONS   //
+    ////////////////////
+
+    `ASSERT_INIT(RawModeFifoDim, RecvFifoDepth >= RawModeFifoDepth)
+
   end
-
-  //TODO: fix reg connections for each way
-
-  meshed_serial_link_reg_top #(
-    .reg_req_t (cfg_req_t),
-    .reg_rsp_t (cfg_rsp_t)
-  ) i_serial_link_reg_top (
-    .clk_i      ( clk_i       ),
-    .rst_ni     ( rst_ni      ),
-    .reg_req_i  ( cfg_req     ),
-    .reg_rsp_o  ( cfg_rsp     ),
-    .reg2hw     ( reg2hw      ),
-    .hw2reg     ( hw2reg      ),
-    .devmode_i  ( testmode_i  )
-  );
-
-  assign clk_ena_o = reg2hw.ctrl.clk_ena.q;
-  assign reset_no = reg2hw.ctrl.reset_n.q;
-  assign isolate_o = {reg2hw.ctrl.axi_out_isolate.q, reg2hw.ctrl.axi_in_isolate.q};
-  assign hw2reg.isolated.axi_in.d = isolated_i[0];
-  assign hw2reg.isolated.axi_out.d = isolated_i[1];
-
-  ////////////////////
-  //   ASSERTIONS   //
-  ////////////////////
-
-  `ASSERT_INIT(RawModeFifoDim, RecvFifoDepth >= RawModeFifoDepth)
 
 endmodule

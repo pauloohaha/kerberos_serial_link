@@ -4,7 +4,7 @@
 
 # Author: Tim Fischer <fischeti@iis.ee.ethz.ch>
 
-BENDER 		?= bender
+BENDER 		?= ./install/bender/bender
 VSIM 		  ?= vsim
 REGGEN 		?= $(shell ${BENDER} path register_interface)/vendor/lowrisc_opentitan/util/regtool.py
 WORK 		  ?= work
@@ -42,12 +42,14 @@ update-regs: src/regs/*.hjson
 	echo $(REGGEN)
 	$(REGGEN) src/regs/serial_link.hjson -r -t src/regs
 	$(REGGEN) src/regs/serial_link_single_channel.hjson -r -t src/regs
+	$(REGGEN) src/regs/meshed_network_ctrl.hjson -r -t src/regs
 
 # --------------
 # QuestaSim
 # --------------
 
-TB_DUT ?= tb_axi_serial_link
+#TB_DUT ?= tb_axi_serial_link
+TB_DUT ?= tb_meshed_serial_link
 
 BENDER_FLAGS := -t test -t simulation
 
@@ -63,7 +65,7 @@ VSIM_FLAGS += $(RUN_ARGS)
 
 ifeq ($(GUI), true)
 	VSIM_FLAGS += -voptargs=+acc
-	VSIM_FLAGS += -do "log -r /*; do util/serial_link_wave.tcl; run -all"
+	VSIM_FLAGS += -do "log -r /*; do util/serial_link_wave.tcl"
 else
 	VSIM_FLAGS += -c
 	VSIM_FLAGS += -do "run -all; exit"

@@ -14,9 +14,12 @@ dependencies:
   common_cells:        { git: "https://github.com/pulp-platform/common_cells.git",       version: 1.28.0 }
   axi:                 { git: "https://github.com/pulp-platform/axi.git",                version: 0.38.0 }
   register_interface:  { git: "https://github.com/pulp-platform/register_interface.git", version: 0.3.8  }
+  tech_cells_generic:  { git: "https://github.com/pulp-platform/tech_cells_generic.git", version: 0.2.11 }
 
 export_include_dirs:
   - src/axis/include
+  - test/tcdm_interface/include/
+  - test/reqrsp_interface/include/
 
 sources:
   files:
@@ -26,6 +29,8 @@ sources:
     - src/regs/serial_link_reg_top.sv
     - src/regs/serial_link_single_channel_reg_pkg.sv
     - src/regs/serial_link_single_channel_reg_top.sv
+    - src/regs/meshed_network_ctrl_regs_reg_pkg.sv
+    - src/regs/meshed_network_ctrl_regs_reg_top.sv
 
     # Parametrization
     - src/serial_link_pkg.sv
@@ -43,6 +48,12 @@ sources:
     # Serial Link Wrapper
     - src/serial_link.sv
 
+    # messhed serial link network layer
+    - src/meshed_network/meshed_serial_link_network.sv
+
+    # meshed serial link
+    - src/meshed_serial_link.sv
+
     # Wrapper for Occamy
     - src/serial_link_occamy_wrapper.sv
 
@@ -56,8 +67,16 @@ sources:
 
     - target: test
       files:
-      - test/tb_axi_serial_link.sv
-      - test/tb_ch_calib_serial_link.sv
-      - test/tb_stream_chopper.sv
-      - test/tb_stream_chopper_dechopper.sv
-      - test/tb_channel_allocator.sv
+      - test/reqrsp_interface/src/reqrsp_pkg.sv
+      - test/reqrsp_interface/src/axi_to_reqrsp.sv
+      - test/tcdm_interface/src/reqrsp_to_tcdm.sv
+      - test/tcdm_interface/src/axi_to_tcdm.sv
+
+    - target: test
+      files:
+      # - test/tb_axi_serial_link.sv
+      # - test/tb_ch_calib_serial_link.sv
+      # - test/tb_stream_chopper.sv
+      # - test/tb_stream_chopper_dechopper.sv
+      # - test/tb_channel_allocator.sv
+      - test/tb_meshed_serial_link.sv

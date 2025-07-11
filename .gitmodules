@@ -1,0 +1,3 @@
+[submodule "src/meshed_network/kerberos_FlooNoC"]
+	path = src/meshed_network/kerberos_FlooNoC
+	url = git@github.com:pauloohaha/Kerberos_FlooNoC.git
