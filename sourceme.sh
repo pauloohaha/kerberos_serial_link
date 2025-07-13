@@ -15,7 +15,7 @@ module load questa/2021.4
 module load spyglass/S-2021.09-1
 
 #Include PATHs
-export PATH=$PATH:/sim/piao/install/bender/bin/
+export PATH=$PATH:/sim2/piao/install/bender/bin/
 export PATH=/sim/piao/install/llvm_snitch/bin:$PATH
 
 export CPATH=/usr/include/$CPATH

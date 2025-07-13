@@ -6,7 +6,7 @@ module tb_meshed_serial_link;
     localparam time         Tck = 200ns;
     localparam bit EnDdr = 1'b1;
     localparam int DATA_WIDTH = 256;
-    localparam int MEM_SIZE_BYTE                = 4 * 1024 * 1024; //4MB
+    localparam int MEM_SIZE_BYTE                = 1 * 1024 * 1024; //1MB
     localparam int MEM_SIZE_BIT                 = MEM_SIZE_BYTE * 8;
     localparam int unsigned MEM_NUM_WORD        = MEM_SIZE_BIT / DATA_WIDTH;
 
@@ -26,14 +26,18 @@ module tb_meshed_serial_link;
 
     import cf_math_pkg::idx_width;
 
+    import meshed_network_ctrl_regs_reg_pkg::*;
+
     // ==============
     //    Config
     // ==============
+    localparam int unsigned NumNodes        = 4;
+    localparam int unsigned NumColumns      = 2;
+    localparam int unsigned NumRows         = 2;
     localparam int unsigned TestDuration    = 100;
     localparam int unsigned MaxClkDiv       = serial_link_pkg::MaxClkDiv;
 
     localparam time         TckSys1         = 50ns;
-    localparam time         TckSys2         = 54ns;
     localparam time         TckReg          = 200ns;
     localparam int unsigned RstClkCyclesSys = 1;
 
@@ -70,278 +74,228 @@ module tb_meshed_serial_link;
     typedef logic [NumLanes*(1+EnDdr)-1:0]  phy_data_t;
 
     // Model signals
-    logic [3:0][NumChannels-1:0]  ddr_rcv_clk_1, ddr_rcv_clk_2;
-    axi_req_t   axi_req_1, axi_req_2;
-    axi_resp_t  axi_rsp_1, axi_rsp_2;
-    cfg_req_t   cfg_req_1;
-    cfg_rsp_t   cfg_rsp_1;
-    cfg_req_t   cfg_req_2;
-    cfg_rsp_t   cfg_rsp_2;
+    axi_req_t   axi_req [NumNodes-1:0];
+    axi_resp_t  axi_rsp [NumNodes-1:0];
+    cfg_req_t   cfg_req [NumNodes-1:0];
+    cfg_rsp_t   cfg_rsp [NumNodes-1:0];
 
     // link
-    wire [3:0][NumChannels*NumLanes-1:0] ddr_o_1;
-    wire [3:0][NumChannels*NumLanes-1:0] ddr_o_2;
+    wire [NumNodes-1:0][3:0][NumChannels-1:0]  ddr_rcv_clk_input, ddr_rcv_clk_output;
+    wire [NumNodes-1:0][3:0][NumChannels*NumLanes-1:0] ddr_input, ddr_output;
 
-    // clock and reset
-    logic clk_1, clk_2, clk_reg;
-    logic rst_1_n, rst_2_n, rst_reg_n;
+    ////////////////////////
+    // Generate each node //
+    ////////////////////////
 
-    // system clock and reset
-    clk_rst_gen #(
-      .ClkPeriod    ( TckReg          ),
-      .RstClkCycles ( RstClkCyclesSys )
-    ) i_clk_rst_gen_reg (
-      .clk_o  ( clk_reg   ),
-      .rst_no ( rst_reg_n )
-    );
+    for (genvar node_id = 0; node_id < NumNodes; node_id++) begin : generate_nodes
 
-    clk_rst_gen #(
-      .ClkPeriod    ( TckSys1         ),
-      .RstClkCycles ( RstClkCyclesSys )
-    ) i_clk_rst_gen_sys_1 (
-      .clk_o  ( clk_1   ),
-      .rst_no ( rst_1_n )
-    );
+        // clock for each node
+        logic clk_i, clk_reg;
+        logic rst_i_n, rst_reg_n;
+        
+        clk_rst_gen #(
+          .ClkPeriod    ( TckReg          ),
+          .RstClkCycles ( RstClkCyclesSys )
+        ) i_clk_rst_gen_reg (
+          .clk_o  ( clk_reg   ),
+          .rst_no ( rst_reg_n )
+        );
 
-    clk_rst_gen #(
-      .ClkPeriod    ( TckSys2          ),
-      .RstClkCycles ( RstClkCyclesSys  )
-    ) i_clk_rst_gen_sys_2 (
-      .clk_o  ( clk_2   ),
-      .rst_no ( rst_2_n )
-    );
+        clk_rst_gen #(
+          .ClkPeriod    ( TckSys1 + node_id / 2 ),
+          .RstClkCycles ( RstClkCyclesSys )
+        ) i_clk_rst_gen_sys_1 (
+          .clk_o  ( clk_i   ),
+          .rst_no ( rst_i_n )
+        );
 
+        // NoC/Mem for each node
+        // Interface with the memory with the TCDM protocol
+        `TCDM_TYPEDEF_ALL(main_mem, logic [AxiAddrWidth-1:0], logic [AxiDataWidth-1:0], logic [AxiDataWidth/8-1:0], logic)
+        main_mem_req_t main_mem_req;
+        main_mem_rsp_t main_mem_rsp;
 
-  /**************************
-   *  Serial Link System 1  *
-   **************************/
+        // Mem model
+        tc_sram #(
+          .DataWidth(AxiDataWidth      ),
+          .NumPorts (1                 ),
+          .NumWords (MEM_NUM_WORD      )
+        ) i_main_memory_1 (
+          .clk_i  (clk_i                                                                                                                       ),
+          .rst_ni (rst_i_n                                                                                                                     ),
+          .req_i  (main_mem_req.q_valid                                                                                                      ),
+          .addr_i (main_mem_req.q.addr[idx_width(MEM_NUM_WORD)+idx_width(AxiDataWidth)-1:idx_width(AxiDataWidth)]      ),
+          .be_i   (main_mem_req.q.strb                                                                                                       ),
+          .wdata_i(main_mem_req.q.data                                                                                                       ),
+          .we_i   (main_mem_req.q.write                                                                                                      ),
+          .rdata_o(main_mem_rsp.p.data                                                                                                       )
+        );
 
-  // Memory for 1st serial link
+        // Always ready
+        assign main_mem_rsp.q_ready = 1'b1;
+        // One cycle latency
+        `FF(main_mem_rsp.p_valid, main_mem_req.q_valid, 1'b0, clk_i, rst_i_n)
 
-  // Interface with the memory with the TCDM protocol
-  `TCDM_TYPEDEF_ALL(main_mem, logic [AxiAddrWidth-1:0], logic [AxiDataWidth-1:0], logic [AxiDataWidth/8-1:0], logic)
-  main_mem_req_t main_mem_1_req;
-  main_mem_rsp_t main_mem_1_rsp;
+        // Serial Link
+        meshed_serial_link #(
+          .NumChannels      (NumChannels      ),
+          .NumLanes         (8                ),
+          .EnDdr            (EnDdr            ),
+          .axi_req_t        ( axi_req_t       ),
+          .axi_rsp_t        ( axi_resp_t      ),
+          .aw_chan_t        ( axi_aw_chan_t   ),
+          .w_chan_t         ( axi_w_chan_t    ),
+          .b_chan_t         ( axi_b_chan_t    ),
+          .ar_chan_t        ( axi_ar_chan_t   ),
+          .r_chan_t         ( axi_r_chan_t    ),
+          .cfg_req_t        ( cfg_req_t       ),
+          .cfg_rsp_t        ( cfg_rsp_t       )
+        ) i_serial_link_1(
+          .clk_i          ( clk_i                         ),
+          .rst_ni         ( rst_i_n                       ),
+          .clk_sl_i       ( clk_i                         ),
+          .rst_sl_ni      ( rst_i_n                       ),
+          .clk_reg_i      ( clk_reg                       ),
+          .rst_reg_ni     ( rst_reg_n                     ),
+          .testmode_i     ( 1'b0                          ),
+          .axi_req_o      ( axi_req[node_id]              ),
+          .axi_rsp_i      ( axi_rsp[node_id]              ),
+          .cfg_req_i      ( cfg_req[node_id]              ),
+          .cfg_rsp_o      ( cfg_rsp[node_id]              ),
+          .ddr_rcv_clk_i  ( ddr_rcv_clk_input[node_id]    ),
+          .ddr_rcv_clk_o  ( ddr_rcv_clk_output[node_id]   ),
+          .ddr_i          ( ddr_input[node_id]            ),
+          .ddr_o          ( ddr_output[node_id]           ),
+          .isolated_i     ( 8'b0            ), /*unused*/
+          .isolate_o      ( /*unused*/      ),
+          .clk_ena_o      ( /*unused*/      ),
+          .reset_no       ( /*unused*/      )
+        );
 
-  meshed_serial_link #(
-    .NumChannels      (NumChannels      ),
-    .NumLanes         (8                ),
-    .EnDdr            (EnDdr            ),
-    .axi_req_t        ( axi_req_t       ),
-    .axi_rsp_t        ( axi_resp_t      ),
-    .aw_chan_t        ( axi_aw_chan_t   ),
-    .w_chan_t         ( axi_w_chan_t    ),
-    .b_chan_t         ( axi_b_chan_t    ),
-    .ar_chan_t        ( axi_ar_chan_t   ),
-    .r_chan_t         ( axi_r_chan_t    ),
-    .cfg_req_t        ( cfg_req_t       ),
-    .cfg_rsp_t        ( cfg_rsp_t       )
-  ) i_serial_link_1(
-    .clk_i          ( clk_1           ),
-    .rst_ni         ( rst_1_n         ),
-    .clk_sl_i       ( clk_1           ),
-    .rst_sl_ni      ( rst_1_n         ),
-    .clk_reg_i      ( clk_reg         ),
-    .rst_reg_ni     ( rst_reg_n       ),
-    .testmode_i     ( 1'b0            ),
-    .axi_req_o      ( axi_req_1       ),
-    .axi_rsp_i      ( axi_rsp_1       ),
-    .cfg_req_i      ( cfg_req_1       ),
-    .cfg_rsp_o      ( cfg_rsp_1       ),
-    .ddr_rcv_clk_i  ( ddr_rcv_clk_2   ),
-    .ddr_rcv_clk_o  ( ddr_rcv_clk_1   ),
-    .ddr_i          ( ddr_o_2         ),
-    .ddr_o          ( ddr_o_1         ),
-    .isolated_i     ( 8'b0            ), /*unused*/
-    .isolate_o      ( /*unused*/      ),
-    .clk_ena_o      ( /*unused*/      ),
-    .reset_no       ( /*unused*/      )
-  );
+        axi_to_tcdm #(
+          .axi_req_t (axi_req_t       ),
+          .axi_rsp_t (axi_resp_t      ),
+          .tcdm_req_t(main_mem_req_t  ),
+          .tcdm_rsp_t(main_mem_rsp_t  ),
+          .AddrWidth (AxiAddrWidth    ),
+          .DataWidth (AxiDataWidth    ),
+          .IdWidth   (AxiIdWidth      ),
+          .BufDepth  (2               )
+        ) i_axi_to_main_memory (
+          .clk_i     (  clk_i             ),
+          .rst_ni    (  rst_i_n           ),
+          .axi_req_i (  axi_req[node_id]  ),
+          .axi_rsp_o (  axi_rsp[node_id]  ),
+          .tcdm_req_o(  main_mem_req      ),
+          .tcdm_rsp_i(  main_mem_rsp      )
+        );
+    end
 
-  axi_to_tcdm #(
-    .axi_req_t (axi_req_t       ),
-    .axi_rsp_t (axi_resp_t      ),
-    .tcdm_req_t(main_mem_req_t  ),
-    .tcdm_rsp_t(main_mem_rsp_t  ),
-    .AddrWidth (AxiAddrWidth    ),
-    .DataWidth (AxiDataWidth    ),
-    .IdWidth   (AxiIdWidth      ),
-    .BufDepth  (2               )
-  ) i_axi_to_main_memory_1 (
-    .clk_i     (  clk_1            ),
-    .rst_ni    (  rst_1_n          ),
-    .axi_req_i (  axi_req_1        ),
-    .axi_rsp_o (  axi_rsp_1        ),
-    .tcdm_req_o(  main_mem_1_req   ),
-    .tcdm_rsp_i(  main_mem_1_rsp   )
-  );
+    /////////////////////////
+    // Generate Connection //
+    /////////////////////////
 
-  // Main memory
-  localparam int unsigned MainMemDataWidthInBytes = AxiIdWidth / 8;
+    //   - 1: upper bits decreasing (South)
+    //   - 2: lower bits decreasing (West )
+    //   - 3: upper bits increasing (North)
+    //   - 4: lower bits increasing (East )
 
-  tc_sram #(
-    .DataWidth(AxiDataWidth      ),
-    .NumPorts (1                 ),
-    .NumWords (MEM_NUM_WORD      )
-  ) i_main_memory_1 (
-    .clk_i  (clk_1                                                                                                                       ),
-    .rst_ni (rst_1_n                                                                                                                     ),
-    .req_i  (main_mem_1_req.q_valid                                                                                                      ),
-    .addr_i (main_mem_1_req.q.addr[idx_width(MEM_NUM_WORD)+idx_width(MainMemDataWidthInBytes)-1:idx_width(MainMemDataWidthInBytes)]      ),
-    .be_i   (main_mem_1_req.q.strb                                                                                                       ),
-    .wdata_i(main_mem_1_req.q.data                                                                                                       ),
-    .we_i   (main_mem_1_req.q.write                                                                                                      ),
-    .rdata_o(main_mem_1_rsp.p.data                                                                                                       )
-  );
+    for (genvar row_id = 0; row_id < NumRows; row_id++) begin
+        for (genvar column_id = 0; column_id < NumColumns; column_id++) begin
+            
+            int node_id = row_id * NumColumns + column_id;
 
-  // Always ready
-  assign main_mem_1_rsp.q_ready = 1'b1;
-  // One cycle latency
-  `FF(main_mem_1_rsp.p_valid, main_mem_1_req.q_valid, 1'b0, clk_1, rst_1_n)
+            // South connection
+            if(row_id != 0) begin
+                int south_node_id = node_id - NumRows;
 
+                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[south_node_id];
+                assign ddr_input[node_id]          = ddr_output[south_node_id];
+            end
 
-  /**************************
-   *  Serial Link System 2  *
-   **************************/
+            // West connection
+            if(column_id != 0) begin
+                int west_node_id = node_id - 1;
 
-  // Memory for 2nd serial link
+                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[west_node_id];
+                assign ddr_input[node_id]          = ddr_output[west_node_id];
+            end
 
-  // Interface with the memory with the TCDM protocol
-  main_mem_req_t main_mem_2_req;
-  main_mem_rsp_t main_mem_2_rsp;
+            // North connection
+            if(row_id != NumRows-1) begin
+                int north_node_id = node_id + NumRows;
 
-  meshed_serial_link #(
-    .NumChannels      (NumChannels      ),
-    .NumLanes         (8                ),
-    .EnDdr            (EnDdr            ),
-    .axi_req_t        ( axi_req_t       ),
-    .axi_rsp_t        ( axi_resp_t      ),
-    .aw_chan_t        ( axi_aw_chan_t   ),
-    .w_chan_t         ( axi_w_chan_t    ),
-    .b_chan_t         ( axi_b_chan_t    ),
-    .ar_chan_t        ( axi_ar_chan_t   ),
-    .r_chan_t         ( axi_r_chan_t    ),
-    .cfg_req_t        ( cfg_req_t       ),
-    .cfg_rsp_t        ( cfg_rsp_t       )
-  ) i_serial_link_2(
-    .clk_i          ( clk_2           ),
-    .rst_ni         ( rst_2_n         ),
-    .clk_sl_i       ( clk_2           ),
-    .rst_sl_ni      ( rst_2_n         ),
-    .clk_reg_i      ( clk_reg         ),
-    .rst_reg_ni     ( rst_reg_n       ),
-    .testmode_i     ( 1'b0            ),
-    .axi_req_o      ( axi_req_2       ),
-    .axi_rsp_i      ( axi_rsp_2       ),
-    .cfg_req_i      ( cfg_req_2       ),
-    .cfg_rsp_o      ( cfg_rsp_2       ),
-    .ddr_rcv_clk_i  ( ddr_rcv_clk_1   ),
-    .ddr_rcv_clk_o  ( ddr_rcv_clk_2   ),
-    .ddr_i          ( ddr_o_1         ),
-    .ddr_o          ( ddr_o_2         ),
-    .isolated_i     ( 8'b0            ), /*unused*/
-    .isolate_o      ( /*unused*/      ),
-    .clk_ena_o      ( /*unused*/      ),
-    .reset_no       ( /*unused*/      )
-  );
+                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[north_node_id];
+                assign ddr_input[node_id]          = ddr_output[north_node_id];
+            end
 
-  axi_to_tcdm #(
-    .axi_req_t (axi_req_t       ),
-    .axi_rsp_t (axi_resp_t      ),
-    .tcdm_req_t(main_mem_req_t  ),
-    .tcdm_rsp_t(main_mem_rsp_t  ),
-    .AddrWidth (AxiAddrWidth    ),
-    .DataWidth (AxiDataWidth    ),
-    .IdWidth   (AxiIdWidth      ),
-    .BufDepth  (2               )
-  ) i_axi_to_main_memory_2 (
-    .clk_i     (  clk_2            ),
-    .rst_ni    (  rst_2_n          ),
-    .axi_req_i (  axi_req_2        ),
-    .axi_rsp_o (  axi_rsp_2        ),
-    .tcdm_req_o(  main_mem_2_req   ),
-    .tcdm_rsp_i(  main_mem_2_rsp   )
-  );
+            // East Connection
+            if(column_id != (NumColumns - 1)) begin
+                int east_node_id = node_id + 1;
 
-  tc_sram #(
-    .DataWidth(AxiDataWidth      ),
-    .NumPorts (1                 ),
-    .NumWords (MEM_NUM_WORD      )
-  ) i_main_memory_2 (
-    .clk_i  (clk_2                                                                                                                       ),
-    .rst_ni (rst_2_n                                                                                                                     ),
-    .req_i  (main_mem_2_req.q_valid                                                                                                      ),
-    .addr_i (main_mem_2_req.q.addr[idx_width(MEM_NUM_WORD)+idx_width(MainMemDataWidthInBytes)-1:idx_width(MainMemDataWidthInBytes)]      ),
-    .be_i   (main_mem_2_req.q.strb                                                                                                       ),
-    .wdata_i(main_mem_2_req.q.data                                                                                                       ),
-    .we_i   (main_mem_2_req.q.write                                                                                                      ),
-    .rdata_o(main_mem_2_rsp.p.data                                                                                                       )
-  );
-
-  // Always ready
-  assign main_mem_2_rsp.q_ready = 1'b1;
-  // One cycle latency
-  `FF(main_mem_2_rsp.p_valid, main_mem_2_req.q_valid, 1'b0, clk_2, rst_2_n)
+                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[east_node_id];
+                assign ddr_input[node_id]          = ddr_output[east_node_id];
+            end
+        end
+    end
 
 
-  ////////////////
-  // Test logic //
-  ////////////////
+    ////////////////
+    // Test logic //
+    ////////////////
 
-  REG_BUS #(
-    .ADDR_WIDTH (RegAddrWidth),
-    .DATA_WIDTH (RegDataWidth)
-  ) cfg_1(clk_reg), cfg_2(clk_reg);
+    typedef reg_test::reg_driver #(
+      .AW ( RegAddrWidth  ),
+      .DW ( RegDataWidth  ),
+      .TA ( 100ps         ),
+      .TT ( 500ps         )
+    ) reg_master_t;
 
-  `REG_BUS_ASSIGN_TO_REQ(cfg_req_1, cfg_1)
-  `REG_BUS_ASSIGN_FROM_RSP(cfg_1, cfg_rsp_1)
+    REG_BUS #(
+      .ADDR_WIDTH (RegAddrWidth),
+      .DATA_WIDTH (RegDataWidth)
+    ) cfg [NumNodes] (clk_reg);
 
-  `REG_BUS_ASSIGN_TO_REQ(cfg_req_2, cfg_2)
-  `REG_BUS_ASSIGN_FROM_RSP(cfg_2, cfg_rsp_2)
+    reg_master_t reg_masters [NumNodes];
 
-  typedef reg_test::reg_driver #(
-    .AW ( RegAddrWidth  ),
-    .DW ( RegDataWidth  ),
-    .TA ( 100ps         ),
-    .TT ( 500ps         )
-  ) reg_master_t;
+    for (genvar test_node_id = 0; test_node_id < NumNodes; test_node_id ++) begin
+        `REG_BUS_ASSIGN_TO_REQ(cfg_req[test_node_id], cfg[test_node_id])
+        `REG_BUS_ASSIGN_FROM_RSP(cfg[test_node_id], cfg_rsp[test_node_id])
 
-  static reg_master_t reg_master_1 = new ( cfg_1 );
-  static reg_master_t reg_master_2 = new ( cfg_2 );
+        initial begin
+            reg_masters[test_node_id] = new ( cfg[test_node_id]);
+        end
+    end
 
-  initial begin
-      reg_master_1.reset_master();
-      
-      configure_network_package (reg_master_1, 0, 0, 32, 0, 0);
-  end
+    task automatic cfg_write(reg_master_t drv, cfg_addr_t addr, cfg_data_t data, cfg_strb_t strb='1);
+      automatic logic resp;
+      drv.send_write(addr, data, strb, resp);
+      assert (!resp) else $error("Not able to write cfg reg");
+    endtask
 
-  task automatic cfg_write(reg_master_t drv, cfg_addr_t addr, cfg_data_t data, cfg_strb_t strb='1);
-    automatic logic resp;
-    drv.send_write(addr, data, strb, resp);
-    assert (!resp) else $error("Not able to write cfg reg");
-  endtask
+    task automatic configure_network_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t data_len, logic [3:0] dst_chip_id);
+        automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
 
-  task automatic configure_network_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t dst_chip_statr_addr, axi_addr_t data_len, logic [3:0] dst_chip_id, logic [1:0] out_dir);
-      automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
+        logic [RegDataWidth-1:0] register_val;
 
-      // config start addr
-      cfg_write(drv, meshed_network_ctrl_reg_offset + meshed_network_ctrl_regs_reg_pkg::MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_START_ADDR_OFFSET, start_addr);
+        // config start addr and len
+        register_val        = 'd0;
+        register_val[31:0]  = start_addr;
+        register_val[63:32] = data_len;
+        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_DATA_OFFSET, register_val);
 
-      // config start addr at dst chip
-      cfg_write(drv, meshed_network_ctrl_reg_offset + meshed_network_ctrl_regs_reg_pkg::MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_DST_CHIP_START_ADDR_OFFSET, dst_chip_statr_addr);
+        // config dst chip id and trigger
+        register_val        = 'd0;
+        register_val[0]     = 1'b1; //trigger
+        register_val[4:1]   = dst_chip_id;
+        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, dst_chip_id);
 
-      // config length of package
-      cfg_write(drv, meshed_network_ctrl_reg_offset + meshed_network_ctrl_regs_reg_pkg::MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_LEN_OFFSET, data_len);
+    endtask
 
-      // config dst chip id
-      cfg_write(drv, meshed_network_ctrl_reg_offset + meshed_network_ctrl_regs_reg_pkg::MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_DST_CHIP_OFFSET, dst_chip_id);
-
-      // config out dir
-      cfg_write(drv, meshed_network_ctrl_reg_offset + meshed_network_ctrl_regs_reg_pkg::MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_OUT_DIR_OFFSET, out_dir);
-
-      // trigger
-      cfg_write(drv, meshed_network_ctrl_reg_offset + meshed_network_ctrl_regs_reg_pkg::MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_TRIGGER_OFFSET, 'd1);
-
-  endtask
+    initial begin
+        reg_masters[0].reset_master();
+        
+        configure_network_package (reg_masters[0], 0, 32, 2);
+    end
 
 endmodule

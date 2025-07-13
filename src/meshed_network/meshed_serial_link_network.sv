@@ -30,7 +30,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   parameter int unsigned InFifoDepth      = 0,
   parameter route_algo_e RouteAlgo        = IdTable,
   parameter int unsigned IdWidth          = 0,
-  parameter int NumCredits                = 8 // Number of credits for flow control
+  parameter int NumCredits                = 8, // Number of credits for flow control
   // Force send out credits belonging to the other side
   // after ForceSendThresh is reached
   localparam int ForceSendThresh  = NumCredits - 4
@@ -261,9 +261,10 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
     .data_o     ( injection_flit        )
   );
 
-  router_data_in[NumRoutes]                 = injection_flit;
-  injection_flit_rdy                        = router_ready_in[NumRoutes][injection_vc];
-  router_valid_in[NumRoutes][injection_vc]  = injection_flit_vld
+  assign injection_vc = 'd0; //TODO Piao: make injection vc dynamic
+
+  assign router_data_in[NumRoutes]                 = injection_flit;
+  assign injection_flit_rdy                        = router_ready_in[NumRoutes][injection_vc];
 
   ////////////////////////////
   // Credit & VC controller //
@@ -319,15 +320,16 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       );
       
       // in coming traffic
-      assign router_in_payload            = payload_t'(axis_in_req_i[dir_id].t.data;);
+      assign router_in_payload            = payload_t'(axis_in_req_i[dir_id].t.data);
       assign router_in_payload_vld        = axis_in_req_i[dir_id].tvalid;
-      assign axis_in_rsp_o[dir_id].tready = router_in_payload_rdy
+      assign axis_in_rsp_o[dir_id].tready = router_in_payload_rdy;
 
       /* router_in/out_payload <=> router_in/out_flit */
 
       // out going traffic
-      assign router_out_payload.data    = router_out_flit;
-      assign router_out_payload.credit  = credits_to_send_q;
+      assign router_out_payload.data              = router_out_flit;
+      assign router_out_payload.virt_channel_id   = router_out_flit_vc;
+      assign router_out_payload.credit            = credits_to_send_q;
 
       assign router_out_payload_vld     = router_out_flit_vld;
       assign router_out_flit_rdy        = router_out_payload_rdy;
@@ -351,6 +353,9 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
             credit_to_send_force = 1'b1;
           end
 
+          //either when there is a valid packet or need to send credit back, send a packet
+          axis_out_reg_valid = credit_to_send_force | router_out_payload_vld;  
+
           // The order of the two if blocks matter!
           if (axis_out_reg_valid & router_out_payload_rdy) begin
             // a flit send, comsume a credit and reset the pending credit to be sents
@@ -363,9 +368,6 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
             credits_out_d += router_in_payload.credit;
             credits_to_send_d++;
           end
-
-          //either when there is a valid packet or need to send credit back, send a packet
-          axis_out_reg_valid = credit_to_send_force | router_out_payload_vld;  
 
           if(credits_out_q == 0) begin
               axis_out_reg_valid = 1'b0; //cannot send when no more credit left
@@ -381,7 +383,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       always_comb begin
           // in coming traffic
           router_valid_in = 'd0;
-          router_valid_in[dir_id] = 'd0
+          router_valid_in[dir_id] = 'd0;
 
           router_data_in[dir_id] = router_in_flit;
 
@@ -390,10 +392,10 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
           
 
           // out going traffic
-          out_virtual_channe_id = 'd0;
+          router_out_flit_vc = 'd0;
           for (int i = 0; i < NumVirtChannels; i++) begin
               if (router_valid_out[dir_id][i]) begin
-                  out_virtual_channe_id = i;
+                  router_out_flit_vc = i;
                   break;
               end
           end
@@ -401,8 +403,6 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
           router_out_flit = router_data_out[dir_id];
           router_out_flit_vld = | router_valid_out[dir_id]; // any channel is valid means valid data
           router_ready_out  = {NumVirtChannels{router_out_flit_rdy}};
-
-          router_out_flit_vc = out_virtual_channe_id;
       end
   end
 
@@ -416,7 +416,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
     .NumPhysChannels    ( 1               ),
     .flit_t             ( flit_t          ),
     .InFifoDepth        ( InFifoDepth     ),
-    .OutFifoDepth       ( OutFifoDepth    ),
+    .OutFifoDepth       ( 0               ),
     .RouteAlgo          ( RouteAlgo       ),
     .IdWidth            ( IdWidth         )
   ) ring_on_mesh_router (
@@ -469,7 +469,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
 
   assign ejection_flit                = router_data_out[NumRoutes];
   assign ejection_vld                 = router_valid_out[NumRoutes];
-  assign router_ready_out[NumRoutes]  = ejection_rdy
+  assign router_ready_out[NumRoutes]  = ejection_rdy;
 
   assign reset_writer = reg2hw_i.meshed_network_ctrl.reset_writer.q;
 
@@ -523,7 +523,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       writer_done = 'd0;
       writer_overflow = 'd0;
       
-      if (data_writer_fsm_current_state == IDLE_STATE) begin
+      if (data_writer_fsm_current_state == RECV_IDLE_STATE) begin
           //idle state, can't receive anything yet
           ejection_rdy = 'd0;
           receive_cnt_d = 'd0; // reset receving cnt
@@ -556,7 +556,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   stream_fifo #(
     .DEPTH  ( 2          ),
     .T      ( logic [AxiDataWidth:0]  )
-  ) i_fetcher_inject_reg (
+  ) i_writer_axi_reg (
     .clk_i      ( clk_i                                     ),
     .rst_ni     ( rst_ni                                    ),
     .flush_i    ( 1'b0                                      ),

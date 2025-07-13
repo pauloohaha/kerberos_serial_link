@@ -15,6 +15,7 @@ dependencies:
   axi:                 { git: "https://github.com/pulp-platform/axi.git",                version: 0.38.0 }
   register_interface:  { git: "https://github.com/pulp-platform/register_interface.git", version: 0.3.8  }
   tech_cells_generic:  { git: "https://github.com/pulp-platform/tech_cells_generic.git", version: 0.2.11 }
+  kerberos_FlooNoC:    { path: "src/meshed_network/kerberos_FlooNoC"                                     }
 
 export_include_dirs:
   - src/axis/include
