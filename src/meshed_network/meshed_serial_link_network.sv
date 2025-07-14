@@ -245,8 +245,8 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
 
   // FIFO for isolating AXI NoC and router
   stream_fifo #(
-    .DEPTH  ( 2          ),
-    .T      ( flit_t     )
+    .DEPTH      ( 2             ),
+    .T ( flit_t )
   ) i_fetcher_inject_reg (
     .clk_i      ( clk_i                 ),
     .rst_ni     ( rst_ni                ),
@@ -306,6 +306,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
 
       // out going traffic
       // FIFO between router and data layer of serial links
+      payload_t  axis_out_req_data;
       stream_fifo #(
         .DEPTH  ( 2           ),
         .T      ( payload_t   )
@@ -320,11 +321,17 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
         .data_i     ( router_out_payload            ),
         .valid_o    ( axis_out_req_o[dir_id].tvalid ),
         .ready_i    ( axis_out_rsp_i[dir_id].tready ),
-        .data_o     ( axis_out_req_o[dir_id].t.data )
+        .data_o     ( axis_out_req_data             )
       );
+
+      //axis data width padded to multiple of 8
+      always_comb begin
+          axis_out_req_o[dir_id].t.data = '0;
+          axis_out_req_o[dir_id].t.data[$bits(payload_t)-1:0] = axis_out_req_data;
+      end
       
       // in coming traffic
-      assign router_in_payload            = payload_t'(axis_in_req_i[dir_id].t.data);
+      assign router_in_payload            = payload_t'(axis_in_req_i[dir_id].t.data[$bits(payload_t)-1:0]); //axis data width padded to multiple of 8
       assign router_in_payload_vld        = axis_in_req_i[dir_id].tvalid;
       assign axis_in_rsp_o[dir_id].tready = router_in_payload_rdy;
 
@@ -568,7 +575,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   /* register to isolate router ejection and axi */
   stream_fifo #(
     .DEPTH  ( 2          ),
-    .T      ( logic [AxiDataWidth:0]  )
+    .DATA_WIDTH ( AxiDataWidth+1 )
   ) i_writer_axi_reg (
     .clk_i      ( clk_i                                     ),
     .rst_ni     ( rst_ni                                    ),
@@ -605,19 +612,21 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   end
 
   always_comb begin
-      axi_writer_addr_d = 'd0;
-
-      axi_req_o.aw.id     = 'd0;
+      axi_writer_addr_d = '0;
+      
+      axi_req_o.aw        = '0;
+      axi_req_o.aw.id     = '0;
       axi_req_o.aw.addr   = axi_writer_addr_q;
-      axi_req_o.aw.len    = 'd0; // 1 beat per burst
+      axi_req_o.aw.len    = '0; // 1 beat per burst
       axi_req_o.aw.size   = 3'b101; // 32 bytes, 256 bits
       axi_req_o.aw.burst  = 2'b01; // increment mode
-      axi_req_o.aw.lock   = 'd0;
-      axi_req_o.aw.cache  = 'd0;
-      axi_req_o.aw.prot   = 'd0;
+      axi_req_o.aw.lock   = '0;
+      axi_req_o.aw.cache  = '0;
+      axi_req_o.aw.prot   = '0;
 
       axi_req_o.aw_valid  = axi_write_out_vld;
 
+      axi_req_o.w         = '0;
       axi_req_o.w.data    = axi_write_out_data;
       axi_req_o.w.strb    = {AxiDataByteLen{1'b1}};
       axi_req_o.w.last    = 1'b1; // 1 beat per burst

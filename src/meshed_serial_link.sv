@@ -97,7 +97,7 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
   // 2) virtual channel id for the router
   // 3) credit
   typedef struct packed {
-    logic [AXIdataWidth-1:0] data;
+    logic [$bits(flit_t)-1:0] data;
     logic [$clog2(NumVirtChannels)-1:0] virt_channel_id;
     credit_t credit;
   } payload_t;

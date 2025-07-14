@@ -9,7 +9,7 @@ module tb_meshed_serial_link;
     localparam time         Tck = 200ns;
     localparam bit EnDdr = 1'b1;
     localparam int DATA_WIDTH = 256;
-    localparam int MEM_SIZE_BYTE                = 1 * 1024 * 1024; //1MB
+    localparam int MEM_SIZE_BYTE                = 1 * 1024; //1KB
     localparam int MEM_SIZE_BIT                 = MEM_SIZE_BYTE * 8;
     localparam int unsigned MEM_NUM_WORD        = MEM_SIZE_BIT / DATA_WIDTH;
 
@@ -113,28 +113,34 @@ module tb_meshed_serial_link;
     //                                                Destination  Virtual Channel  Source Port
     floo_req_generic_flit_t  golden_queue [NumNodes-1:0][NumRoutes][NumVirtChannels][NumRoutes][$];
 
+    // =============
+    //    Clock
+    // =============
+
+    // clock for each node
+    logic clk_reg;
+    logic rst_reg_n;
+    
+    clk_rst_gen #(
+      .ClkPeriod    ( TckReg          ),
+      .RstClkCycles ( RstClkCyclesSys )
+    ) i_clk_rst_gen_reg (
+      .clk_o  ( clk_reg   ),
+      .rst_no ( rst_reg_n )
+    );
+
     ////////////////////////
     // Generate each node //
     ////////////////////////
 
     for (genvar node_id = 0; node_id < NumNodes; node_id++) begin : generate_nodes
 
-        // clock for each node
-        logic clk_i, clk_reg;
-        logic rst_i_n, rst_reg_n;
-        
-        clk_rst_gen #(
-          .ClkPeriod    ( TckReg          ),
-          .RstClkCycles ( RstClkCyclesSys )
-        ) i_clk_rst_gen_reg (
-          .clk_o  ( clk_reg   ),
-          .rst_no ( rst_reg_n )
-        );
+        logic clk_i, rst_i_n;
 
         clk_rst_gen #(
           .ClkPeriod    ( TckSys1 + node_id / 2 ),
           .RstClkCycles ( RstClkCyclesSys )
-        ) i_clk_rst_gen_sys_1 (
+        ) i_clk_rst_gen_sys (
           .clk_o  ( clk_i   ),
           .rst_no ( rst_i_n )
         );
@@ -150,7 +156,7 @@ module tb_meshed_serial_link;
           .DataWidth(AxiDataWidth      ),
           .NumPorts (1                 ),
           .NumWords (MEM_NUM_WORD      )
-        ) i_main_memory_1 (
+        ) i_main_memory (
           .clk_i  (clk_i                                                                                                                       ),
           .rst_ni (rst_i_n                                                                                                                     ),
           .req_i  (main_mem_req.q_valid                                                                                                      ),
@@ -226,6 +232,16 @@ module tb_meshed_serial_link;
           .tcdm_req_o(  main_mem_req      ),
           .tcdm_rsp_i(  main_mem_rsp      )
         );
+
+        // Init memory
+        int mem_row_start_addr  = 0 / AxiStrbWidth;
+        initial begin
+            for (int mem_row_id = 0; mem_row_id < MEM_NUM_WORD; mem_row_id += 1) begin
+                for (int bit_offset = 0; bit_offset < AxiDataWidth; bit_offset += 32) begin
+                    i_main_memory.sram[mem_row_id][bit_offset +: 32] = $urandom;
+                end
+            end
+        end
     end
 
     /////////////////////////
@@ -314,23 +330,23 @@ module tb_meshed_serial_link;
         logic [RegDataWidth-1:0] register_val;
 
         // config start addr and len
-        register_val        = 'd0;
-        register_val[31:0]  = start_addr;
-        register_val[63:32] = data_len;
+        register_val = {data_len, start_addr};
         cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_DATA_OFFSET, register_val);
 
         // config dst chip id and trigger
-        register_val        = 'd0;
-        register_val[0]     = 1'b1; //trigger
-        register_val[4:1]   = dst_chip_id;
-        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, dst_chip_id);
-
+        register_val  = {59'd0, dst_chip_id, 1'b1};
+        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, register_val);
     endtask
 
+
     initial begin
+        $urandom(1234);
+
+        //init_memory(0, 0, 32);
+
         reg_masters[0].reset_master();
         
-        configure_network_package (reg_masters[0], 0, 32, 2);
+        configure_network_package (reg_masters[0], 0, 32, 3);
     end
 
 endmodule

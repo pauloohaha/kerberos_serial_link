@@ -63,9 +63,11 @@ VSIM_FLAGS += $(TB_DUT)
 VSIM_FLAGS += -work $(WORK)
 VSIM_FLAGS += $(RUN_ARGS)
 
+GUI = true
+
 ifeq ($(GUI), true)
 	VSIM_FLAGS += -voptargs=+acc
-	VSIM_FLAGS += -do "log -r /*; do util/serial_link_wave.tcl"
+	VSIM_FLAGS += -do "log -r /*; do util/meshed_serial_link_wave.tcl"
 else
 	VSIM_FLAGS += -c
 	VSIM_FLAGS += -do "run -all; exit"
