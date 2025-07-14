@@ -23,13 +23,14 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   parameter int  max_outstanding_axi_req = 3,
 
   // ring on mesh router
-  parameter int unsigned NumNodes         = 16, // Number of external port
+  parameter int unsigned NumNodes         = 4, // Number of external port
   parameter int unsigned NumRoutes        = 4, // Number of external port
-  parameter int unsigned NumVirtChannels  = 0,
+  parameter int unsigned NumVirtChannels  = 1,
   parameter type         flit_t           = logic,
   parameter int unsigned InFifoDepth      = 0,
   parameter route_algo_e RouteAlgo        = IdTable,
-  parameter int unsigned IdWidth          = 0,
+  parameter int unsigned IdWidth          = $clog2(NumRoutes+1),
+  parameter type         id_t             = logic[IdWidth-1:0],
   parameter int NumCredits                = 8, // Number of credits for flow control
   // Force send out credits belonging to the other side
   // after ForceSendThresh is reached
@@ -184,7 +185,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       FEED_IDLE_STATE:        data_feeder_fsm_next_state = (data_fetcher_trigger) ? FEED_DATA_STATE : FEED_IDLE_STATE;
                                                            
       FEED_DATA_STATE:        data_feeder_fsm_next_state = (feeded_data_len_q + AxiDataByteLen) > fetch_len ?
-                                                           ((fetcher_axis_rsp.tready) ? FEED_IDLE_STATE : FEED_DATA_STATE) :
+                                                           ((fetcher_flit_rdy & fetcher_flit_vld) ? FEED_IDLE_STATE : FEED_DATA_STATE) :
                                                            FEED_DATA_STATE;
                                                            // if feeded all data and the last data is accepeted, finish
     endcase
@@ -194,7 +195,6 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   always_comb begin
       fetcher_flit        = 'd0;
       fetcher_flit_vld    = 1'b0;
-      fetcher_flit_rdy    = 1'd0;
 
       feeded_data_len_d         = 'd0;
       
@@ -261,10 +261,14 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
     .data_o     ( injection_flit        )
   );
 
-  assign injection_vc = 'd0; //TODO Piao: make injection vc dynamic
+  always_comb begin
+      injection_vc = 'd0; //TODO Piao: make injection vc dynamic
+      router_valid_in[0] = '0;
 
-  assign router_data_in[NumRoutes]                 = injection_flit;
-  assign injection_flit_rdy                        = router_ready_in[NumRoutes][injection_vc];
+      router_data_in[0]                 = injection_flit;
+      router_valid_in[0][injection_vc]  = 1'b1;
+      injection_flit_rdy                = router_ready_in[0][injection_vc];
+  end
 
   ////////////////////////////
   // Credit & VC controller //
@@ -382,27 +386,26 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       // virtual channel distribution to the router
       always_comb begin
           // in coming traffic
-          router_valid_in = 'd0;
-          router_valid_in[dir_id] = 'd0;
+          router_valid_in[dir_id+1] = 'd0;
 
-          router_data_in[dir_id] = router_in_flit;
+          router_data_in[dir_id+1] = router_in_flit;
 
           // mask the vld signal until the router is ready
-          router_valid_in[dir_id][router_in_flit_vc] = (router_in_flit_vld) ? router_ready_in[dir_id][router_in_flit_vc] : 1'b0;
+          router_valid_in[dir_id+1][router_in_flit_vc] = (router_in_flit_vld) ? router_ready_in[dir_id+1][router_in_flit_vc] : 1'b0;
           
 
           // out going traffic
           router_out_flit_vc = 'd0;
           for (int i = 0; i < NumVirtChannels; i++) begin
-              if (router_valid_out[dir_id][i]) begin
+              if (router_valid_out[dir_id+1][i]) begin
                   router_out_flit_vc = i;
                   break;
               end
           end
 
-          router_out_flit = router_data_out[dir_id];
-          router_out_flit_vld = | router_valid_out[dir_id]; // any channel is valid means valid data
-          router_ready_out  = {NumVirtChannels{router_out_flit_rdy}};
+          router_out_flit           = router_data_out[dir_id+1];
+          router_out_flit_vld       = | router_valid_out[dir_id+1]; // any channel is valid means valid data
+          router_ready_out[dir_id+1]  = {NumVirtChannels{router_out_flit_rdy}};
       end
   end
 
@@ -410,24 +413,34 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   // Ring on mesh router //
   /////////////////////////
 
+  logic [$clog2(NumRoutes+1)-1:0] ring_on_mesh_up_port, ring_on_mesh_down_port;
+  logic [$clog2(NumNodes)-1:0]  ring_on_mesh_id;
+
+  assign ring_on_mesh_up_port   = reg2hw_i.meshed_network_id.ring_up_port.q;
+  assign ring_on_mesh_down_port = reg2hw_i.meshed_network_id.ring_down_port.q;
+
+  assign ring_on_mesh_id        = reg2hw_i.meshed_network_id.ring_id.q;
+
   floo_ring_on_mesh_router #(
-    .NumRoutes          ( NumRoutes       ),
+    .NumRoutes          ( NumRoutes+1     ), //+1 for injection/ejection ports
     .NumVirtChannels    ( NumVirtChannels ),
     .NumPhysChannels    ( 1               ),
+    .NumNodes           ( NumNodes        ),
     .flit_t             ( flit_t          ),
     .InFifoDepth        ( InFifoDepth     ),
     .OutFifoDepth       ( 0               ),
     .RouteAlgo          ( RouteAlgo       ),
-    .IdWidth            ( IdWidth         )
+    .IdWidth            ( IdWidth         ),
+    .id_t               ( id_t            )
   ) ring_on_mesh_router (
     .clk_i                    ( clk_i                   ),
     .rst_ni                   ( rst_ni                  ),
-    .test_enable_i            ( test_enable_i           ),
-    .xy_id_i                  ( xy_id_i                 ),
-    .id_route_map_i           ( 'd0                     ),
-    .ring_on_mesh_id_i        ( ring_on_mesh_id_i       ),
-    .ring_on_mesh_up_port_i   ( ring_on_mesh_up_port_i  ),
-    .ring_on_mesh_down_port_i ( ring_on_mesh_down_port_i),
+    .test_enable_i            ( '0                      ),
+    .xy_id_i                  ( '0                      ),
+    .id_route_map_i           ( '0                      ),
+    .ring_on_mesh_id_i        ( ring_on_mesh_id         ),
+    .ring_on_mesh_up_port_i   ( ring_on_mesh_up_port    ),
+    .ring_on_mesh_down_port_i ( ring_on_mesh_down_port  ),
     .valid_i                  ( router_valid_in         ),
     .ready_o                  ( router_ready_in         ),
     .data_i                   ( router_data_in          ),
@@ -467,9 +480,9 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   `FF(data_writer_fsm_current_state, data_writer_fsm_next_state, RECV_IDLE_STATE, clk_i, rst_ni)
   `FF(receive_cnt_q, receive_cnt_d, 'd0, clk_i, rst_ni)
 
-  assign ejection_flit                = router_data_out[NumRoutes];
-  assign ejection_vld                 = router_valid_out[NumRoutes];
-  assign router_ready_out[NumRoutes]  = ejection_rdy;
+  assign ejection_flit        = router_data_out[0];
+  assign ejection_vld         = router_valid_out[0];
+  assign router_ready_out[0]  = ejection_rdy;
 
   assign reset_writer = reg2hw_i.meshed_network_ctrl.reset_writer.q;
 
@@ -532,7 +545,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
           axi_write_reg_vld = | ejection_vld;
           axi_write_reg_data = ejection_flit.payload;
           axi_write_reg_last = ejection_flit.hdr.last;
-          ejection_rdy = {NumVirtChannels-1{axi_write_reg_rdy}};
+          ejection_rdy = {NumVirtChannels{axi_write_reg_rdy}};
 
           // count the number of received flit
           receive_cnt_d = (axi_write_reg_rdy & axi_write_reg_vld) ? receive_cnt_q + AxiDataByteLen : receive_cnt_q;

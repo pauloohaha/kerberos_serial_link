@@ -8,7 +8,15 @@
 
 // A meshed chiplet inter-chip network. Consist of a netowrk controller and 4 way serial links
 
-module meshed_serial_link #(
+module meshed_serial_link import floo_pkg::route_algo_e;#(
+  // ring on mesh router
+  parameter int unsigned NumNodes         = 4, // Number of external port
+  parameter int unsigned NumRoutes        = 4, // Number of external port
+  parameter int unsigned NumVirtChannels  = 1,
+  parameter type         flit_t           = logic,
+  parameter type         id_t             = logic[NumRoutes-1:0],
+  parameter int unsigned InFifoDepth      = 0,
+  parameter route_algo_e RouteAlgo        = floo_pkg::IdTable,
   // The number of physical chnannelsc per direction
   parameter int NumChannels       = 5,
   // The number of lanes per channel
@@ -26,9 +34,7 @@ module meshed_serial_link #(
   // width of the AXIS payload data
   parameter int AXIdataWidth = 256,
   // the width of the id field used to index chips
-  parameter int ChipIdWidth = 4,
-  // number of virtual channels for the ring on mesh router
-  parameter int unsigned NumVirtChannels  = 0,
+  parameter int ChipIdWidth = 1, //unused
   parameter type axi_req_t  = logic,
   parameter type axi_rsp_t  = logic,
   parameter type aw_chan_t  = logic,
@@ -178,12 +184,21 @@ module meshed_serial_link #(
   );
 
   meshed_serial_link_network #(
-    .axi_req_t  ( axi_req_t   ),
-    .axi_rsp_t  ( axi_rsp_t   ),
-    .reg2hw_t   ( meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_reg2hw_t ),
-    .hw2reg_t   ( meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_hw2reg_t ),
-    .axis_req_t ( axis_req_t  ),
-    .axis_rsp_t ( axis_rsp_t  )
+    .NumNodes         ( NumNodes    ),
+    .NumRoutes        ( NumRoutes   ),
+    .NumVirtChannels  ( NumVirtChannels ),
+    .flit_t           ( flit_t      ),
+    .id_t             ( id_t        ),
+    .InFifoDepth      ( InFifoDepth ),
+    .RouteAlgo        ( RouteAlgo   ),
+    .NumCredits       ( NumCredits  ),
+    .payload_t        ( payload_t   ),
+    .axi_req_t        ( axi_req_t   ),
+    .axi_rsp_t        ( axi_rsp_t   ),
+    .reg2hw_t         ( meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_reg2hw_t ),
+    .hw2reg_t         ( meshed_network_ctrl_regs_reg_pkg::meshed_network_ctrl_regs_hw2reg_t ),
+    .axis_req_t       ( axis_req_t  ),
+    .axis_rsp_t       ( axis_rsp_t  )
   ) i_meshed_serial_link_network (
     .clk_i                    ( clk_i                     ),
     .rst_ni                   ( rst_ni                    ),

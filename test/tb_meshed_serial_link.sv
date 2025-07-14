@@ -1,7 +1,10 @@
 // Author: Pu Deng <piaodeng@stanford.edu>
 
+`include "floo_noc/typedef.svh"
 
 module tb_meshed_serial_link;
+
+    import floo_pkg::*;
 
     localparam time         Tck = 200ns;
     localparam bit EnDdr = 1'b1;
@@ -80,8 +83,35 @@ module tb_meshed_serial_link;
     cfg_rsp_t   cfg_rsp [NumNodes-1:0];
 
     // link
-    wire [NumNodes-1:0][3:0][NumChannels-1:0]  ddr_rcv_clk_input, ddr_rcv_clk_output;
-    wire [NumNodes-1:0][3:0][NumChannels*NumLanes-1:0] ddr_input, ddr_output;
+    logic [NumNodes-1:0][3:0][NumChannels-1:0]                ddr_rcv_clk_input;
+    logic [NumNodes-1:0][3:0][NumChannels-1:0]                ddr_rcv_clk_output;
+    logic [NumNodes-1:0][3:0][NumChannels-1:0][NumLanes-1:0]  ddr_input;
+    logic [NumNodes-1:0][3:0][NumChannels-1:0][NumLanes-1:0]  ddr_output;
+
+    // =============
+    //    Router
+    // =============
+    localparam int unsigned NumRoutes = 5;
+    localparam int unsigned NumVirtChannels = 6;
+    localparam int unsigned IdWidth = $clog2(NumRoutes); //5 ports per router
+    localparam int unsigned FlitWidth = AxiDataWidth;
+    
+
+    typedef logic [FlitWidth-1:0] payload_t;
+    typedef logic [$clog2(NumRows)-1:0] y_t;
+    typedef logic [$clog2(NumColumns)-1:0] x_t;
+    typedef logic [1:0] port_id_t;
+    typedef logic [NumNodes-1:0] mask_t;
+
+    `FLOO_TYPEDEF_XY_NODE_ID_T(id_t, x_t, y_t, port_id_t)
+    `FLOO_TYPEDEF_ROM_HDR_T(hdr_t, id_t, id_t, logic, logic, mask_t)
+    `FLOO_TYPEDEF_GENERIC_FLIT_T(req, hdr_t, payload_t)
+
+    //                                                  Source Port   Virtual Channel
+    floo_req_generic_flit_t  stimuli_queue [NumNodes-1:0][NumRoutes][NumVirtChannels][$];
+
+    //                                                Destination  Virtual Channel  Source Port
+    floo_req_generic_flit_t  golden_queue [NumNodes-1:0][NumRoutes][NumVirtChannels][NumRoutes][$];
 
     ////////////////////////
     // Generate each node //
@@ -138,9 +168,16 @@ module tb_meshed_serial_link;
 
         // Serial Link
         meshed_serial_link #(
-          .NumChannels      (NumChannels      ),
-          .NumLanes         (8                ),
-          .EnDdr            (EnDdr            ),
+          .NumNodes         ( NumNodes        ),
+          .NumRoutes        ( NumRoutes-1     ),
+          .NumVirtChannels  ( 1               ),
+          .flit_t           ( floo_req_generic_flit_t ),
+          .id_t             ( id_t            ),
+          .InFifoDepth      ( 2               ),
+          .RouteAlgo        ( XYRouting       ),
+          .NumChannels      ( NumChannels     ),
+          .NumLanes         ( 8               ),
+          .EnDdr            ( EnDdr           ),
           .axi_req_t        ( axi_req_t       ),
           .axi_rsp_t        ( axi_resp_t      ),
           .aw_chan_t        ( axi_aw_chan_t   ),
@@ -150,7 +187,7 @@ module tb_meshed_serial_link;
           .r_chan_t         ( axi_r_chan_t    ),
           .cfg_req_t        ( cfg_req_t       ),
           .cfg_rsp_t        ( cfg_rsp_t       )
-        ) i_serial_link_1(
+        ) i_serial_link (
           .clk_i          ( clk_i                         ),
           .rst_ni         ( rst_i_n                       ),
           .clk_sl_i       ( clk_i                         ),
@@ -200,41 +237,39 @@ module tb_meshed_serial_link;
     //   - 3: upper bits increasing (North)
     //   - 4: lower bits increasing (East )
 
-    for (genvar row_id = 0; row_id < NumRows; row_id++) begin
-        for (genvar column_id = 0; column_id < NumColumns; column_id++) begin
+    for (genvar node_id = 0; node_id < NumNodes; node_id++) begin
             
-            int node_id = row_id * NumColumns + column_id;
+        int row_id = node_id / NumColumns;
+        int column_id = node_id % NumColumns;
 
+        int south_node_id = node_id - NumRows;
+        int west_node_id = node_id - 1;
+        int north_node_id = node_id + NumRows;
+        int east_node_id = node_id + 1;
+
+        always_comb begin
             // South connection
             if(row_id != 0) begin
-                int south_node_id = node_id - NumRows;
-
-                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[south_node_id];
-                assign ddr_input[node_id]          = ddr_output[south_node_id];
+                ddr_rcv_clk_input[node_id][0]  = ddr_rcv_clk_output[south_node_id][2];
+                ddr_input[node_id][0]          = ddr_output[south_node_id][2];
             end
-
+          
             // West connection
             if(column_id != 0) begin
-                int west_node_id = node_id - 1;
-
-                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[west_node_id];
-                assign ddr_input[node_id]          = ddr_output[west_node_id];
+                ddr_rcv_clk_input[node_id][1]  = ddr_rcv_clk_output[west_node_id][3];
+                ddr_input[node_id][1]          = ddr_output[west_node_id][3];
             end
 
             // North connection
             if(row_id != NumRows-1) begin
-                int north_node_id = node_id + NumRows;
-
-                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[north_node_id];
-                assign ddr_input[node_id]          = ddr_output[north_node_id];
+                ddr_rcv_clk_input[node_id][2]  = ddr_rcv_clk_output[north_node_id][0];
+                ddr_input[node_id][2]          = ddr_output[north_node_id][0];
             end
 
             // East Connection
             if(column_id != (NumColumns - 1)) begin
-                int east_node_id = node_id + 1;
-
-                assign ddr_rcv_clk_input[node_id]  = ddr_rcv_clk_output[east_node_id];
-                assign ddr_input[node_id]          = ddr_output[east_node_id];
+                ddr_rcv_clk_input[node_id][3]  = ddr_rcv_clk_output[east_node_id][1];
+                ddr_input[node_id][3]          = ddr_output[east_node_id][1];
             end
         end
     end
