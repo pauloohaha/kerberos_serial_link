@@ -72,9 +72,6 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
     input  logic [3:0][NumChannels-1:0][NumLanes-1:0] ddr_i,
     output logic [3:0][NumChannels-1:0][NumLanes-1:0] ddr_o,
 
-    // AXI isolation signals (in/out), if not used tie to 0
-    input  logic [3:0][1:0]                isolated_i,
-    output logic [3:0][1:0]                isolate_o,
     // Clock gate register
     output logic [3:0]                clk_ena_o,
     // synch-reset register
@@ -215,8 +212,8 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
   // 4 way links
   for (genvar i = 0; i < 4; i++) begin: gen_4_way_data_serial_link
 
-    serial_link_reg_pkg::serial_link_reg2hw_t  reg2hw;
-    serial_link_reg_pkg::serial_link_hw2reg_t  hw2reg;
+    serial_link_reg_pkg::serial_link_reg2hw_t  reg2hw_dir;
+    serial_link_reg_pkg::serial_link_hw2reg_t  hw2reg_dir;
 
     /////////////////////////
     //   DATA LINK LAYER   //
@@ -225,10 +222,10 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
     logic cfg_flow_control_fifo_clear;
     logic cfg_raw_mode_out_data_fifo_clear;
 
-    assign cfg_flow_control_fifo_clear = reg2hw.flow_control_fifo_clear.q
-      & reg2hw.flow_control_fifo_clear.qe;
-    assign cfg_raw_mode_out_data_fifo_clear = reg2hw.raw_mode_out_data_fifo_ctrl.clear.q
-      & reg2hw.raw_mode_out_data_fifo_ctrl.clear.qe;
+    assign cfg_flow_control_fifo_clear = reg2hw_dir.flow_control_fifo_clear.q
+      & reg2hw_dir.flow_control_fifo_clear.qe;
+    assign cfg_raw_mode_out_data_fifo_clear = reg2hw_dir.raw_mode_out_data_fifo_ctrl.clear.q
+      & reg2hw_dir.raw_mode_out_data_fifo_ctrl.clear.qe;
 
     serial_link_data_link #(
       .axis_req_t       ( axis_req_t        ),
@@ -241,31 +238,31 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
       .PayloadSplits    ( PayloadSplits     ),
       .EnDdr            ( EnDdr             )
     ) i_serial_link_data_link (
-      .clk_i                                   ( clk_sl_i                                         ),
-      .rst_ni                                  ( rst_sl_ni                                        ),
-      .axis_in_req_i                           ( axis_out_req[i]                                  ),
-      .axis_in_rsp_o                           ( axis_out_rsp[i]                                  ),
-      .axis_out_req_o                          ( axis_in_req[i]                                   ),
-      .axis_out_rsp_i                          ( axis_in_rsp[i]                                   ),
-      .data_out_o                              ( data_link2alloc_data_out[i]                         ),
-      .data_out_valid_o                        ( data_link2alloc_data_out_valid[i]                   ),
-      .data_out_ready_i                        ( alloc2data_link_data_out_ready[i]                   ),
-      .data_in_i                               ( alloc2data_link_data_in[i]                          ),
-      .data_in_valid_i                         ( alloc2data_link_data_in_valid[i]                    ),
-      .data_in_ready_o                         ( data_link2alloc_data_in_ready[i]                    ),
-      .cfg_flow_control_fifo_clear_i           ( cfg_flow_control_fifo_clear                      ),
-      .cfg_raw_mode_en_i                       ( reg2hw.raw_mode_en                               ),
-      .cfg_raw_mode_in_ch_sel_i                ( reg2hw.raw_mode_in_ch_sel                        ),
-      .cfg_raw_mode_in_data_o                  ( hw2reg.raw_mode_in_data[NumBitsPerCycle-1:0]     ),
-      .cfg_raw_mode_in_data_valid_o            ( hw2reg.raw_mode_in_data_valid                    ),
-      .cfg_raw_mode_in_data_ready_i            ( reg2hw.raw_mode_in_data.re                       ),
-      .cfg_raw_mode_out_ch_mask_i              ( reg2hw.raw_mode_out_ch_mask                      ),
-      .cfg_raw_mode_out_data_i                 ( phy_data_t'(reg2hw.raw_mode_out_data_fifo.q)     ),
-      .cfg_raw_mode_out_data_valid_i           ( reg2hw.raw_mode_out_data_fifo.qe                 ),
-      .cfg_raw_mode_out_en_i                   ( reg2hw.raw_mode_out_en                           ),
-      .cfg_raw_mode_out_data_fifo_clear_i      ( cfg_raw_mode_out_data_fifo_clear                 ),
-      .cfg_raw_mode_out_data_fifo_fill_state_o ( hw2reg.raw_mode_out_data_fifo_ctrl.fill_state.d  ),
-      .cfg_raw_mode_out_data_fifo_is_full_o    ( hw2reg.raw_mode_out_data_fifo_ctrl.is_full.d     )
+      .clk_i                                   ( clk_sl_i                                             ),
+      .rst_ni                                  ( rst_sl_ni                                            ),
+      .axis_in_req_i                           ( axis_out_req[i]                                      ),
+      .axis_in_rsp_o                           ( axis_out_rsp[i]                                      ),
+      .axis_out_req_o                          ( axis_in_req[i]                                       ),
+      .axis_out_rsp_i                          ( axis_in_rsp[i]                                       ),
+      .data_out_o                              ( data_link2alloc_data_out[i]                          ),
+      .data_out_valid_o                        ( data_link2alloc_data_out_valid[i]                    ),
+      .data_out_ready_i                        ( alloc2data_link_data_out_ready[i]                    ),
+      .data_in_i                               ( alloc2data_link_data_in[i]                           ),
+      .data_in_valid_i                         ( alloc2data_link_data_in_valid[i]                     ),
+      .data_in_ready_o                         ( data_link2alloc_data_in_ready[i]                     ),
+      .cfg_flow_control_fifo_clear_i           ( cfg_flow_control_fifo_clear                          ),
+      .cfg_raw_mode_en_i                       ( reg2hw_dir.raw_mode_en                               ),
+      .cfg_raw_mode_in_ch_sel_i                ( reg2hw_dir.raw_mode_in_ch_sel                        ),
+      .cfg_raw_mode_in_data_o                  ( hw2reg_dir.raw_mode_in_data[NumBitsPerCycle-1:0]     ),
+      .cfg_raw_mode_in_data_valid_o            ( hw2reg_dir.raw_mode_in_data_valid                    ),
+      .cfg_raw_mode_in_data_ready_i            ( reg2hw_dir.raw_mode_in_data.re                       ),
+      .cfg_raw_mode_out_ch_mask_i              ( reg2hw_dir.raw_mode_out_ch_mask                      ),
+      .cfg_raw_mode_out_data_i                 ( phy_data_t'(reg2hw_dir.raw_mode_out_data_fifo.q)     ),
+      .cfg_raw_mode_out_data_valid_i           ( reg2hw_dir.raw_mode_out_data_fifo.qe                 ),
+      .cfg_raw_mode_out_en_i                   ( reg2hw_dir.raw_mode_out_en                           ),
+      .cfg_raw_mode_out_data_fifo_clear_i      ( cfg_raw_mode_out_data_fifo_clear                     ),
+      .cfg_raw_mode_out_data_fifo_fill_state_o ( hw2reg_dir.raw_mode_out_data_fifo_ctrl.fill_state.d  ),
+      .cfg_raw_mode_out_data_fifo_is_full_o    ( hw2reg_dir.raw_mode_out_data_fifo_ctrl.is_full.d     )
     );
 
     ///////////////////////
@@ -275,47 +272,47 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
     logic cfg_tx_clear, cfg_rx_clear;
     logic cfg_tx_flush_trigger;
 
-    assign cfg_tx_clear = reg2hw.channel_alloc_tx_ctrl.clear.q
-      & reg2hw.channel_alloc_tx_ctrl.clear.qe;
-    assign cfg_rx_clear = reg2hw.channel_alloc_rx_ctrl.q
-      & reg2hw.channel_alloc_rx_ctrl.qe;
-    assign cfg_tx_flush_trigger = reg2hw.channel_alloc_tx_ctrl.flush.q
-      & reg2hw.channel_alloc_tx_ctrl.flush.qe;
+    assign cfg_tx_clear = reg2hw_dir.channel_alloc_tx_ctrl.clear.q
+      & reg2hw_dir.channel_alloc_tx_ctrl.clear.qe;
+    assign cfg_rx_clear = reg2hw_dir.channel_alloc_rx_ctrl.q
+      & reg2hw_dir.channel_alloc_rx_ctrl.qe;
+    assign cfg_tx_flush_trigger = reg2hw_dir.channel_alloc_tx_ctrl.flush.q
+      & reg2hw_dir.channel_alloc_tx_ctrl.flush.qe;
 
     serial_link_channel_allocator #(
       .phy_data_t  ( phy_data_t    ),
       .NumChannels ( NumChannels   )
     ) i_channel_allocator(
-      .clk_i                     ( clk_sl_i                                       ),
-      .rst_ni                    ( rst_sl_ni                                      ),
-      .cfg_tx_clear_i            ( cfg_tx_clear                                   ),
-      .cfg_tx_channel_en_i       ( reg2hw.channel_alloc_tx_ch_en                  ),
-      .cfg_tx_bypass_en_i        ( reg2hw.channel_alloc_tx_cfg.bypass_en.q        ),
-      .cfg_tx_auto_flush_en_i    ( reg2hw.channel_alloc_tx_cfg.auto_flush_en.q    ),
-      .cfg_tx_auto_flush_count_i ( reg2hw.channel_alloc_tx_cfg.auto_flush_count.q ),
-      .cfg_tx_flush_trigger_i    ( cfg_tx_flush_trigger                           ),
-      .cfg_rx_clear_i            ( cfg_rx_clear                                   ),
-      .cfg_rx_bypass_en_i        ( reg2hw.channel_alloc_rx_cfg.bypass_en.q        ),
-      .cfg_rx_channel_en_i       ( reg2hw.channel_alloc_rx_ch_en                  ),
-      .cfg_rx_auto_flush_en_i    ( reg2hw.channel_alloc_rx_cfg.auto_flush_en.q    ),
-      .cfg_rx_auto_flush_count_i ( reg2hw.channel_alloc_rx_cfg.auto_flush_count.q ),
-      .cfg_rx_sync_en_i          ( reg2hw.channel_alloc_rx_cfg.sync_en.q          ),
+      .clk_i                     ( clk_sl_i                                           ),
+      .rst_ni                    ( rst_sl_ni                                          ),
+      .cfg_tx_clear_i            ( cfg_tx_clear                                       ),
+      .cfg_tx_channel_en_i       ( reg2hw_dir.channel_alloc_tx_ch_en                  ),
+      .cfg_tx_bypass_en_i        ( reg2hw_dir.channel_alloc_tx_cfg.bypass_en.q        ),
+      .cfg_tx_auto_flush_en_i    ( reg2hw_dir.channel_alloc_tx_cfg.auto_flush_en.q    ),
+      .cfg_tx_auto_flush_count_i ( reg2hw_dir.channel_alloc_tx_cfg.auto_flush_count.q ),
+      .cfg_tx_flush_trigger_i    ( cfg_tx_flush_trigger                               ),
+      .cfg_rx_clear_i            ( cfg_rx_clear                                       ),
+      .cfg_rx_bypass_en_i        ( reg2hw_dir.channel_alloc_rx_cfg.bypass_en.q        ),
+      .cfg_rx_channel_en_i       ( reg2hw_dir.channel_alloc_rx_ch_en                  ),
+      .cfg_rx_auto_flush_en_i    ( reg2hw_dir.channel_alloc_rx_cfg.auto_flush_en.q    ),
+      .cfg_rx_auto_flush_count_i ( reg2hw_dir.channel_alloc_rx_cfg.auto_flush_count.q ),
+      .cfg_rx_sync_en_i          ( reg2hw_dir.channel_alloc_rx_cfg.sync_en.q          ),
       // From Data Link Layer
-      .data_out_i                ( data_link2alloc_data_out[i]                    ),
-      .data_out_valid_i          ( data_link2alloc_data_out_valid[i]              ),
-      .data_out_ready_o          ( alloc2data_link_data_out_ready[i]              ),
-      // To Phy
-      .data_out_o                ( alloc2phy_data_out[i]                          ),
-      .data_out_valid_o          ( alloc2phy_data_out_valid[i]                    ),
-      .data_out_ready_i          ( phy2alloc_data_out_ready[i]                    ),
-      // From Phy
-      .data_in_i                 ( phy2alloc_data_in[i]                           ),
-      .data_in_valid_i           ( phy2alloc_data_in_valid[i]                     ),
-      .data_in_ready_o           ( alloc2phy_data_in_ready[i]                     ),
-      // To Data Link Layer
-      .data_in_o                 ( alloc2data_link_data_in[i]                     ),
-      .data_in_valid_o           ( alloc2data_link_data_in_valid[i]               ),
-      .data_in_ready_i           ( data_link2alloc_data_in_ready[i]               )
+      .data_out_i                ( data_link2alloc_data_out[i]                        ),
+      .data_out_valid_i          ( data_link2alloc_data_out_valid[i]                  ),
+      .data_out_ready_o          ( alloc2data_link_data_out_ready[i]                  ),
+      // To Phy   
+      .data_out_o                ( alloc2phy_data_out[i]                              ),
+      .data_out_valid_o          ( alloc2phy_data_out_valid[i]                        ),
+      .data_out_ready_i          ( phy2alloc_data_out_ready[i]                        ),
+      // From Phy   
+      .data_in_i                 ( phy2alloc_data_in[i]                               ),
+      .data_in_valid_i           ( phy2alloc_data_in_valid[i]                         ),
+      .data_in_ready_o           ( alloc2phy_data_in_ready[i]                         ),
+      // To Data Link Layer   
+      .data_in_o                 ( alloc2data_link_data_in[i]                         ),
+      .data_in_valid_o           ( alloc2data_link_data_in_valid[i]                   ),
+      .data_in_ready_i           ( data_link2alloc_data_in_ready[i]                   )
     );
 
 
@@ -333,9 +330,9 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
       ) i_serial_link_physical (
         .clk_i             ( clk_sl_i                        ),
         .rst_ni            ( rst_sl_ni                       ),
-        .clk_div_i         ( reg2hw.tx_phy_clk_div[i*NumChannels+j].q      ),
-        .clk_shift_start_i ( reg2hw.tx_phy_clk_start[i*NumChannels+j].q    ),
-        .clk_shift_end_i   ( reg2hw.tx_phy_clk_end[i*NumChannels+j].q      ),
+        .clk_div_i         ( reg2hw_dir.tx_phy_clk_div[j].q  ),
+        .clk_shift_start_i ( reg2hw_dir.tx_phy_clk_start[j].q),
+        .clk_shift_end_i   ( reg2hw_dir.tx_phy_clk_end[j].q  ),
         .ddr_rcv_clk_i     ( ddr_rcv_clk_i[i][j]             ),
         .ddr_rcv_clk_o     ( ddr_rcv_clk_o[i][j]             ),
         .data_out_i        ( alloc2phy_data_out[i][j]        ),
@@ -355,8 +352,8 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
     //   CONFIGURATION REGISTERS   //
     /////////////////////////////////
 
-    cfg_req_t cfg_req;
-    cfg_rsp_t cfg_rsp;
+    cfg_req_t splited_cdc_cfg_req;
+    cfg_rsp_t splited_cdc_cfg_rsp;
 
     if (!NoRegCdc) begin : gen_reg_cdc
       reg_cdc #(
@@ -370,12 +367,12 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
 
         .dst_clk_i  ( clk_i                ),
         .dst_rst_ni ( rst_ni               ),
-        .dst_req_o  ( cfg_req              ),
-        .dst_rsp_i  ( cfg_rsp              )
+        .dst_req_o  ( splited_cdc_cfg_req  ),
+        .dst_rsp_i  ( splited_cdc_cfg_rsp  )
       );
     end else begin : gen_no_reg_cdc
-      assign cfg_req = splited_cfg_req[i];
-      assign cfg_rsp_o = splited_cfg_rsp[i];
+      assign splited_cdc_cfg_req = splited_cfg_req[i];
+      assign splited_cdc_cfg_rsp_o = splited_cfg_rsp[i];
     end
 
 
@@ -383,20 +380,17 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
       .reg_req_t (cfg_req_t),
       .reg_rsp_t (cfg_rsp_t)
     ) i_serial_link_reg_top (
-      .clk_i      ( clk_i       ),
-      .rst_ni     ( rst_ni      ),
-      .reg_req_i  ( cfg_req     ),
-      .reg_rsp_o  ( cfg_rsp     ),
-      .reg2hw     ( reg2hw      ),
-      .hw2reg     ( hw2reg      ),
-      .devmode_i  ( testmode_i  )
+      .clk_i      ( clk_i               ),
+      .rst_ni     ( rst_ni              ),
+      .reg_req_i  ( splited_cdc_cfg_req ),
+      .reg_rsp_o  ( splited_cdc_cfg_rsp ),
+      .reg2hw     ( reg2hw_dir          ),
+      .hw2reg     ( hw2reg_dir          ),
+      .devmode_i  ( testmode_i          )
     );
 
-    assign clk_ena_o[i] = reg2hw.ctrl.clk_ena.q;
-    assign reset_no[i] = reg2hw.ctrl.reset_n.q;
-    assign isolate_o[i] = {reg2hw.ctrl.axi_out_isolate.q, reg2hw.ctrl.axi_in_isolate.q};
-    assign hw2reg.isolated.axi_in.d = isolated_i[i][0];
-    assign hw2reg.isolated.axi_out.d = isolated_i[i][1];
+    assign clk_ena_o[i] = reg2hw_dir.ctrl.clk_ena.q;
+    assign reset_no[i] = reg2hw_dir.ctrl.reset_n.q;
 
     ////////////////////
     //   ASSERTIONS   //

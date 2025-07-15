@@ -21,10 +21,10 @@ package meshed_network_ctrl_regs_reg_pkg;
       logic [3:0]  q;
     } ring_id;
     struct packed {
-      logic [1:0]  q;
+      logic [2:0]  q;
     } ring_up_port;
     struct packed {
-      logic [1:0]  q;
+      logic [2:0]  q;
     } ring_down_port;
   } meshed_network_ctrl_regs_reg2hw_meshed_network_id_reg_t;
 
@@ -156,7 +156,7 @@ package meshed_network_ctrl_regs_reg_pkg;
 
   // Register -> HW type
   typedef struct packed {
-    meshed_network_ctrl_regs_reg2hw_meshed_network_id_reg_t meshed_network_id; // [176:165]
+    meshed_network_ctrl_regs_reg2hw_meshed_network_id_reg_t meshed_network_id; // [178:165]
     meshed_network_ctrl_regs_reg2hw_meshed_network_data_fetcher_data_reg_t meshed_network_data_fetcher_data; // [164:101]
     meshed_network_ctrl_regs_reg2hw_meshed_network_rom_ctrl_reg_t meshed_network_rom_ctrl; // [100:83]
     meshed_network_ctrl_regs_reg2hw_meshed_network_data_recv_data_reg_t meshed_network_data_recv_data; // [82:19]

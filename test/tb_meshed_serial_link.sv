@@ -133,16 +133,17 @@ module tb_meshed_serial_link;
     // Generate each node //
     ////////////////////////
 
-    for (genvar node_id = 0; node_id < NumNodes; node_id++) begin : generate_nodes
+    logic [NumNodes-1:0] clk_i;
+    logic [NumNodes-1:0] rst_i_n;
 
-        logic clk_i, rst_i_n;
+    for (genvar node_id = 0; node_id < NumNodes; node_id++) begin : generate_nodes
 
         clk_rst_gen #(
           .ClkPeriod    ( TckSys1 + node_id / 2 ),
           .RstClkCycles ( RstClkCyclesSys )
         ) i_clk_rst_gen_sys (
-          .clk_o  ( clk_i   ),
-          .rst_no ( rst_i_n )
+          .clk_o  ( clk_i[node_id]   ),
+          .rst_no ( rst_i_n[node_id] )
         );
 
         // NoC/Mem for each node
@@ -157,8 +158,8 @@ module tb_meshed_serial_link;
           .NumPorts (1                 ),
           .NumWords (MEM_NUM_WORD      )
         ) i_main_memory (
-          .clk_i  (clk_i                                                                                                                       ),
-          .rst_ni (rst_i_n                                                                                                                     ),
+          .clk_i  (clk_i[node_id]                                                                                                            ),
+          .rst_ni (rst_i_n[node_id]                                                                                                          ),
           .req_i  (main_mem_req.q_valid                                                                                                      ),
           .addr_i (main_mem_req.q.addr[idx_width(MEM_NUM_WORD)+idx_width(AxiDataWidth)-1:idx_width(AxiDataWidth)]      ),
           .be_i   (main_mem_req.q.strb                                                                                                       ),
@@ -170,7 +171,7 @@ module tb_meshed_serial_link;
         // Always ready
         assign main_mem_rsp.q_ready = 1'b1;
         // One cycle latency
-        `FF(main_mem_rsp.p_valid, main_mem_req.q_valid, 1'b0, clk_i, rst_i_n)
+        `FF(main_mem_rsp.p_valid, main_mem_req.q_valid, 1'b0, clk_i[node_id], rst_i_n[node_id])
 
         // Serial Link
         meshed_serial_link #(
@@ -194,10 +195,10 @@ module tb_meshed_serial_link;
           .cfg_req_t        ( cfg_req_t       ),
           .cfg_rsp_t        ( cfg_rsp_t       )
         ) i_meshed_serial_link (
-          .clk_i          ( clk_i                         ),
-          .rst_ni         ( rst_i_n                       ),
-          .clk_sl_i       ( clk_i                         ),
-          .rst_sl_ni      ( rst_i_n                       ),
+          .clk_i          ( clk_i[node_id]                ),
+          .rst_ni         ( rst_i_n[node_id]              ),
+          .clk_sl_i       ( clk_i[node_id]                ),
+          .rst_sl_ni      ( rst_i_n[node_id]              ),
           .clk_reg_i      ( clk_reg                       ),
           .rst_reg_ni     ( rst_reg_n                     ),
           .testmode_i     ( 1'b0                          ),
@@ -209,8 +210,6 @@ module tb_meshed_serial_link;
           .ddr_rcv_clk_o  ( ddr_rcv_clk_output[node_id]   ),
           .ddr_i          ( ddr_input[node_id]            ),
           .ddr_o          ( ddr_output[node_id]           ),
-          .isolated_i     ( 8'b0            ), /*unused*/
-          .isolate_o      ( /*unused*/      ),
           .clk_ena_o      ( /*unused*/      ),
           .reset_no       ( /*unused*/      )
         );
@@ -225,8 +224,8 @@ module tb_meshed_serial_link;
           .IdWidth   (AxiIdWidth      ),
           .BufDepth  (2               )
         ) i_axi_to_main_memory (
-          .clk_i     (  clk_i             ),
-          .rst_ni    (  rst_i_n           ),
+          .clk_i     (  clk_i[node_id]    ),
+          .rst_ni    (  rst_i_n[node_id]  ),
           .axi_req_i (  axi_req[node_id]  ),
           .axi_rsp_o (  axi_rsp[node_id]  ),
           .tcdm_req_o(  main_mem_req      ),
@@ -324,24 +323,35 @@ module tb_meshed_serial_link;
       assert (!resp) else $error("Not able to write cfg reg");
     endtask
 
+    task automatic cfg_read(reg_master_t drv, cfg_addr_t addr, output cfg_data_t data);
+      automatic logic resp;
+      drv.send_read(addr, data, resp);
+      assert (!resp) else $error("Not able to write cfg reg");
+    endtask
+
     task automatic configure_network_xy_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t data_len, logic [3:0] dst_chip_id);
         automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
 
-        logic [RegDataWidth-1:0] register_val;
+        cfg_data_t register_val;
+        cfg_data_t data;
 
         // config start addr and len
         register_val = {data_len, start_addr};
         cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_DATA_OFFSET, register_val);
 
-        // config dst chip id and trigger
-        register_val  = {59'd0, dst_chip_id, 1'b1};
+        // read the original val in the ctrl reg
+        cfg_read(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, data);
+
+        // config dst chip id and trigger send, keep the recv setting
+        register_val  = {data[63:5], dst_chip_id, 1'b1};
         cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, register_val);
     endtask
 
-    task automatic configure_network_ring_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t data_len, logic [3:0] dst_chip_mask, logic traffic_dir);
+    task automatic configure_network_ring_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t data_len, logic [3:0] dst_chip_id, logic [3:0] dst_chip_mask, logic traffic_dir);
         automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
 
-        logic [RegDataWidth-1:0] register_val;
+        cfg_data_t register_val;
+        cfg_data_t data;
 
         // config start addr and len
         register_val = {data_len, start_addr};
@@ -351,20 +361,73 @@ module tb_meshed_serial_link;
         register_val = {57'd0, dst_chip_mask, traffic_dir, 1'b1};
         cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_ROM_CTRL_OFFSET, register_val);
 
-        // config dst chip id and trigger
-        register_val  = {63'd0, 1'b1};
+        // read the original val in the ctrl reg
+        cfg_read(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, data);
+
+        // trigger send, keep the recv setting
+        register_val  = {data[63:5], dst_chip_id, 1'b1};
         cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, register_val);
     endtask
 
-    task automatic configure_router_id (reg_master_t drv, logic [3:0] xy_id, logic [3:0] ring_id, logic [1:0] ring_up_port, logic [1:0] ring_down_port);
+    task automatic configure_recv_packege (reg_master_t drv, axi_addr_t start_addr, axi_addr_t max_data_len);
+          automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
+
+          cfg_data_t register_val;
+          cfg_data_t data;
+
+          // set the recv addr and max len
+          register_val = {max_data_len, start_addr};
+          cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_RECV_DATA_OFFSET, register_val);
+
+          // read the original val in the ctrl reg
+          cfg_read(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, data);
+
+          // trigger recv, keep the send setting
+          register_val  = {57'd0, 1'b0, 1'b1, data[4:0]};
+          cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, register_val);
+    endtask
+
+    task automatic wait_recv_package (reg_master_t drv);
+          automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
+          cfg_data_t data;
+
+          // read the original val in the ctrl reg
+          do begin
+              cfg_read(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_STATUS_OFFSET, data);
+          end while(data[6] != 1'b1);
+    endtask
+
+    task automatic configure_router_id (reg_master_t drv, logic [3:0] xy_id, logic [3:0] ring_id, logic [2:0] ring_up_port, logic [2:0] ring_down_port);
         automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
 
-        logic [RegDataWidth-1:0] register_val;
+        cfg_data_t register_val;
 
         register_val = {52'd0, ring_down_port, ring_up_port, ring_id, xy_id};
         cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_ID_OFFSET, register_val);
     endtask
 
+    task automatic initialize_serial_link (reg_master_t drv, int serial_link_dir);
+        automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * serial_link_dir;
+
+        // De-assert reset
+        cfg_write(drv, meshed_network_ctrl_reg_offset + serial_link_reg_pkg::SERIAL_LINK_CTRL_OFFSET, 64'h300);
+        // Assert res64
+        cfg_write(drv, meshed_network_ctrl_reg_offset + serial_link_reg_pkg::SERIAL_LINK_CTRL_OFFSET, 64'h302);
+        // Enable clo64
+        cfg_write(drv, meshed_network_ctrl_reg_offset + serial_link_reg_pkg::SERIAL_LINK_CTRL_OFFSET, 64'h303);
+        // Enable channel allocator bypass mode and
+        // auto flush feature but disable sync for RX side
+        if (NumChannels > 1) begin
+          cfg_write(drv, serial_link_reg_pkg::SERIAL_LINK_CHANNEL_ALLOC_TX_CFG_OFFSET, 64'h3);
+          cfg_write(drv, serial_link_reg_pkg::SERIAL_LINK_CHANNEL_ALLOC_RX_CFG_OFFSET, 64'h3);
+        end
+        // Wait for some clock cycles
+        repeat(50) drv.cycle_end();
+    endtask
+
+    task automatic wait_for_reset(int node_id);
+      @(posedge rst_i_n[node_id]);
+    endtask
 
     initial begin
         void'($urandom(1234)); // set seed
@@ -374,12 +437,43 @@ module tb_meshed_serial_link;
         reg_masters[2].reset_master();
         reg_masters[3].reset_master();
 
+        fork
+          wait_for_reset(0);
+          wait_for_reset(1);
+          wait_for_reset(2);
+          wait_for_reset(3);
+        join
+
         configure_router_id(reg_masters[0], 0, 0, 4, 3);
-        configure_router_id(reg_masters[1], 1, 0, 3, 2);
+        configure_router_id(reg_masters[1], 1, 1, 3, 2);
         configure_router_id(reg_masters[2], 2, 3, 1, 4);
         configure_router_id(reg_masters[3], 3, 2, 2, 1);
         
-        configure_network_ring_package (reg_masters[0], 0, 32, 4'b1110, 1);
+        // initialize links
+        for (int node_id = 0; node_id < NumNodes; node_id++) begin
+            for (int link_dir = 0; link_dir < 4; link_dir++) begin
+                initialize_serial_link(reg_masters[node_id], link_dir);
+                $info("[Node%0d] Link %0d is ready", node_id, link_dir);
+            end
+        end
+        
+        // configure recv at chip 1, 2, 3
+        configure_recv_packege(reg_masters[0], 0, 32);
+        configure_recv_packege(reg_masters[1], 0, 32);
+        configure_recv_packege(reg_masters[2], 0, 32);
+        configure_recv_packege(reg_masters[3], 0, 32);
+
+        // configure send
+        // send a message from chip 0 to chip 1, 2, 3; with start addr 0 and len 32 bytes
+        configure_network_ring_package (reg_masters[0], 0, 32, 4'd3, 4'b1110, 1);
+
+        //wait packaget to recv
+        fork
+            wait_recv_package(reg_masters[1]);
+            wait_recv_package(reg_masters[2]);
+            wait_recv_package(reg_masters[3]);
+        join
+        
     end
 
 endmodule

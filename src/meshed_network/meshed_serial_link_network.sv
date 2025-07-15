@@ -209,7 +209,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
           fetcher_flit.payload    = axi_rsp_i.r.data;
           fetcher_flit.hdr.src_id = reg2hw_i.meshed_network_id.xy_id.q;
           fetcher_flit.hdr.dst_id = reg2hw_i.meshed_network_ctrl.dst_chip.q;
-          fetcher_flit.hdr.last   = (feeded_data_len_q + AxiDataByteLen) > fetch_len ? 1'b1 : 1'b0;
+          fetcher_flit.hdr.last   = (feeded_data_len_q + AxiDataByteLen) >= fetch_len ? 1'b1 : 1'b0;
           
           // ring on mesh header ctrl
           fetcher_flit.hdr.ring_on_mesh_mcast     = reg2hw_i.meshed_network_rom_ctrl.rom_en.q;
@@ -602,25 +602,29 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   );
 
   // AXI writier
-  typedef enum logic [1:0] {
+  typedef enum logic [0:0] {
     WRITE_IDLE_STATE,
-    WRITE_SEND_ADDR_STATE,
-    WRITE_SEND_DATA_STATE
+    WRITE_SEND_STATE
   } axi_writer_fsm_state_t;
 
   logic [AxiAddrWidth:0] axi_writer_addr_d, axi_writer_addr_q;
 
   axi_writer_fsm_state_t axi_writer_fsm_current_state, axi_writer_fsm_next_state;
 
+  logic axi_aw_sent_d, axi_aw_sent_q, axi_w_sent_d, axi_w_sent_q;
+
   `FF(axi_writer_fsm_current_state, axi_writer_fsm_next_state, WRITE_IDLE_STATE, clk_i, rst_ni)
   `FF(axi_writer_addr_q, axi_writer_addr_d, 'd0, clk_i, rst_ni)
-
+  `FF(axi_aw_sent_q, axi_aw_sent_d, 'd0, clk_i, rst_ni)
+  `FF(axi_w_sent_q, axi_w_sent_d, 'd0, clk_i, rst_ni)
+  
   // writer fsm state ctrl
   always_comb begin
       case (axi_writer_fsm_current_state)
-          WRITE_IDLE_STATE:       axi_writer_fsm_next_state = (axi_write_out_vld) ? WRITE_SEND_ADDR_STATE : WRITE_IDLE_STATE;
-          WRITE_SEND_ADDR_STATE:  axi_writer_fsm_next_state = (axi_rsp_i.aw_ready) ? WRITE_SEND_DATA_STATE : WRITE_SEND_ADDR_STATE;
-          WRITE_SEND_DATA_STATE:  axi_writer_fsm_next_state = (axi_write_out_vld & axi_rsp_i.w_ready)  ? (axi_write_out_last ? WRITE_IDLE_STATE :WRITE_SEND_ADDR_STATE) : WRITE_SEND_DATA_STATE;
+          WRITE_IDLE_STATE:       axi_writer_fsm_next_state = (axi_write_out_vld) ? WRITE_SEND_STATE : WRITE_IDLE_STATE;
+          WRITE_SEND_STATE:       axi_writer_fsm_next_state = ((axi_aw_sent_d | axi_aw_sent_q) & (axi_w_sent_d | axi_w_sent_q)) ? 
+                                                              (axi_write_out_last ? WRITE_IDLE_STATE : WRITE_SEND_STATE) : 
+                                                              WRITE_SEND_STATE;
       endcase
   end
 
@@ -650,17 +654,24 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
 
       axi_write_out_rdy   = 1'b0;
 
+      axi_aw_sent_d       = '0;
+      axi_w_sent_d        = '0;
+
       if (axi_writer_fsm_current_state == WRITE_IDLE_STATE) begin
           axi_writer_addr_d = reg2hw_i.meshed_network_data_recv_data.recv_addr.q;
 
-      end else if (axi_writer_fsm_current_state == WRITE_SEND_ADDR_STATE) begin
-          axi_req_o.aw_valid = 1'b1;
-          axi_writer_addr_d = (axi_rsp_i.aw_ready) ? axi_writer_addr_q + AxiDataByteLen : 
-                                                     axi_writer_addr_q;
-      end else if (axi_writer_fsm_current_state == WRITE_SEND_DATA_STATE) begin
-          axi_write_out_rdy = axi_rsp_i.w_ready;
-          axi_req_o.w_valid = axi_write_out_vld;
-      end
+      end else if (axi_writer_fsm_current_state == WRITE_SEND_STATE) begin
+          axi_req_o.aw_valid = ~axi_aw_sent_q;
+          axi_req_o.w_valid  = ~axi_w_sent_q;
+
+          axi_aw_sent_d      = (axi_req_o.aw_valid & axi_rsp_i.aw_ready);
+          axi_w_sent_d       = (axi_req_o.w_valid & axi_rsp_i.w_ready);
+
+          // a data is sent if both aw and w have been sent or currently being sent
+          axi_write_out_rdy  = ((axi_aw_sent_d | axi_aw_sent_q) & (axi_w_sent_d | axi_w_sent_q)); 
+          axi_writer_addr_d  = ((axi_aw_sent_d | axi_aw_sent_q) & (axi_w_sent_d | axi_w_sent_q)) ? axi_writer_addr_q + AxiDataByteLen : 
+                                                                                                   axi_writer_addr_q;
+      end 
   end
 
 

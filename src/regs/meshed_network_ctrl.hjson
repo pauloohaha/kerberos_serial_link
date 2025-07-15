@@ -28,13 +28,13 @@
           resval: "0"
         },
         {
-          bits: "9:8",
+          bits: "10:8",
           name: "ring_up_port",
           desc: "direction for the up port on the ring"
           resval: "0"
         },
         {
-          bits: "11:10",
+          bits: "13:11",
           name: "ring_down_port",
           desc: "direction for the down port on the ring"
           resval: "0"

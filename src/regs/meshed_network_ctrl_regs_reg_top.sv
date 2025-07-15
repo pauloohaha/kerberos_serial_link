@@ -74,11 +74,11 @@ module meshed_network_ctrl_regs_reg_top #(
   logic [3:0] meshed_network_id_ring_id_qs;
   logic [3:0] meshed_network_id_ring_id_wd;
   logic meshed_network_id_ring_id_we;
-  logic [1:0] meshed_network_id_ring_up_port_qs;
-  logic [1:0] meshed_network_id_ring_up_port_wd;
+  logic [2:0] meshed_network_id_ring_up_port_qs;
+  logic [2:0] meshed_network_id_ring_up_port_wd;
   logic meshed_network_id_ring_up_port_we;
-  logic [1:0] meshed_network_id_ring_down_port_qs;
-  logic [1:0] meshed_network_id_ring_down_port_wd;
+  logic [2:0] meshed_network_id_ring_down_port_qs;
+  logic [2:0] meshed_network_id_ring_down_port_wd;
   logic meshed_network_id_ring_down_port_we;
   logic [31:0] meshed_network_data_fetcher_data_fetcher_start_addr_qs;
   logic [31:0] meshed_network_data_fetcher_data_fetcher_start_addr_wd;
@@ -177,11 +177,11 @@ module meshed_network_ctrl_regs_reg_top #(
   );
 
 
-  //   F[ring_up_port]: 9:8
+  //   F[ring_up_port]: 10:8
   prim_subreg #(
-    .DW      (2),
+    .DW      (3),
     .SWACCESS("RW"),
-    .RESVAL  (2'h0)
+    .RESVAL  (3'h0)
   ) u_meshed_network_id_ring_up_port (
     .clk_i   (clk_i    ),
     .rst_ni  (rst_ni  ),
@@ -203,11 +203,11 @@ module meshed_network_ctrl_regs_reg_top #(
   );
 
 
-  //   F[ring_down_port]: 11:10
+  //   F[ring_down_port]: 13:11
   prim_subreg #(
-    .DW      (2),
+    .DW      (3),
     .SWACCESS("RW"),
-    .RESVAL  (2'h0)
+    .RESVAL  (3'h0)
   ) u_meshed_network_id_ring_down_port (
     .clk_i   (clk_i    ),
     .rst_ni  (rst_ni  ),
@@ -758,10 +758,10 @@ module meshed_network_ctrl_regs_reg_top #(
   assign meshed_network_id_ring_id_wd = reg_wdata[7:4];
 
   assign meshed_network_id_ring_up_port_we = addr_hit[0] & reg_we & !reg_error;
-  assign meshed_network_id_ring_up_port_wd = reg_wdata[9:8];
+  assign meshed_network_id_ring_up_port_wd = reg_wdata[10:8];
 
   assign meshed_network_id_ring_down_port_we = addr_hit[0] & reg_we & !reg_error;
-  assign meshed_network_id_ring_down_port_wd = reg_wdata[11:10];
+  assign meshed_network_id_ring_down_port_wd = reg_wdata[13:11];
 
   assign meshed_network_data_fetcher_data_fetcher_start_addr_we = addr_hit[1] & reg_we & !reg_error;
   assign meshed_network_data_fetcher_data_fetcher_start_addr_wd = reg_wdata[31:0];
@@ -803,8 +803,8 @@ module meshed_network_ctrl_regs_reg_top #(
       addr_hit[0]: begin
         reg_rdata_next[3:0] = meshed_network_id_xy_id_qs;
         reg_rdata_next[7:4] = meshed_network_id_ring_id_qs;
-        reg_rdata_next[9:8] = meshed_network_id_ring_up_port_qs;
-        reg_rdata_next[11:10] = meshed_network_id_ring_down_port_qs;
+        reg_rdata_next[10:8] = meshed_network_id_ring_up_port_qs;
+        reg_rdata_next[13:11] = meshed_network_id_ring_down_port_qs;
       end
 
       addr_hit[1]: begin
