@@ -323,9 +323,12 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
         .ready_i    ( axis_out_rsp_i[dir_id].tready ),
         .data_o     ( axis_out_req_data             )
       );
+      assign axis_in_rsp_o[dir_id].tready = router_in_payload_rdy;
 
       //axis data width padded to multiple of 8
       always_comb begin
+          axis_out_req_o[dir_id].t      = '0; //set unused field to 0
+
           axis_out_req_o[dir_id].t.data = '0;
           axis_out_req_o[dir_id].t.data[$bits(payload_t)-1:0] = axis_out_req_data;
       end
@@ -333,7 +336,6 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       // in coming traffic
       assign router_in_payload            = payload_t'(axis_in_req_i[dir_id].t.data[$bits(payload_t)-1:0]); //axis data width padded to multiple of 8
       assign router_in_payload_vld        = axis_in_req_i[dir_id].tvalid;
-      assign axis_in_rsp_o[dir_id].tready = router_in_payload_rdy;
 
       /* router_in/out_payload <=> router_in/out_flit */
 
@@ -348,11 +350,16 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       // in coming traffic
       assign router_in_flit         = router_in_payload.data;
       assign router_in_flit_vld     = router_in_payload_vld; // mask out valid until the router is ready
+      assign router_in_payload_rdy  = router_in_flit_rdy;
+
       // select the correct VC ready signal only when valid flit
       assign router_in_flit_vc      = router_in_payload.virt_channel_id;
       assign router_in_flit_rdy     = (router_in_payload_vld) ? router_ready_in[dir_id][router_in_flit_vc] : 1'b0;
 
       // credit logic
+      `FF(credits_to_send_q, credits_to_send_d, NumCredits, clk_i, rst_ni)
+      `FF(credits_out_q, credits_out_d, '0, clk_i, rst_ni)
+
       always_comb begin
           credits_out_d = credits_out_q;
           credits_to_send_d = credits_to_send_q;
@@ -497,6 +504,10 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   assign hw2reg_o.meshed_network_ctrl.recv_rdy.d        = 1'd0;
   assign hw2reg_o.meshed_network_ctrl.recv_rdy.de       = reg2hw_i.meshed_network_ctrl.recv_rdy.q;
 
+  // do not modify dst_chip ctrl from hw
+  assign hw2reg_o.meshed_network_ctrl.dst_chip.d        = '0;
+  assign hw2reg_o.meshed_network_ctrl.dst_chip.de       = '0;
+
   // self reseting reset ctrl
   assign hw2reg_o.meshed_network_ctrl.reset_writer.d    = 1'd0;
   assign hw2reg_o.meshed_network_ctrl.reset_writer.de   = reg2hw_i.meshed_network_ctrl.reset_writer.q;
@@ -637,6 +648,8 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
 
       axi_req_o.b_ready   = 1'b1; // always ready for write rsp
 
+      axi_write_out_rdy   = 1'b0;
+
       if (axi_writer_fsm_current_state == WRITE_IDLE_STATE) begin
           axi_writer_addr_d = reg2hw_i.meshed_network_data_recv_data.recv_addr.q;
 
@@ -645,6 +658,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
           axi_writer_addr_d = (axi_rsp_i.aw_ready) ? axi_writer_addr_q + AxiDataByteLen : 
                                                      axi_writer_addr_q;
       end else if (axi_writer_fsm_current_state == WRITE_SEND_DATA_STATE) begin
+          axi_write_out_rdy = axi_rsp_i.w_ready;
           axi_req_o.w_valid = axi_write_out_vld;
       end
   end

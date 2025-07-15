@@ -67,7 +67,7 @@ GUI = true
 
 ifeq ($(GUI), true)
 	VSIM_FLAGS += -voptargs=+acc
-	VSIM_FLAGS += -do "log -r /*; do util/meshed_serial_link_wave.tcl"
+	VSIM_FLAGS += -do "log -r /*; do util/meshed_serial_link_wave.tcl; run 5000ns"
 else
 	VSIM_FLAGS += -c
 	VSIM_FLAGS += -do "run -all; exit"
