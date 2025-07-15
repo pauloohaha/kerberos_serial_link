@@ -126,7 +126,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   always_comb begin
     case (data_requester_fsm_current_state)
       REQ_IDLE_STATE:       data_requester_fsm_next_state = (data_fetcher_trigger) ? SEND_REQ_STATE : REQ_IDLE_STATE;
-      SEND_REQ_STATE:       data_requester_fsm_next_state = (requested_data_len_q + AxiDataByteLen) > fetch_len ? 
+      SEND_REQ_STATE:       data_requester_fsm_next_state = (requested_data_len_q + AxiDataByteLen) >= fetch_len ? 
                                                                                 (axi_rsp_i.ar_ready ? REQ_IDLE_STATE : SEND_REQ_STATE) : 
                                                                                 SEND_REQ_STATE; 
                                                                                 // If next fetch exceed the fetch length and current request is accepeted, goto IDLE
@@ -184,7 +184,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
     case (data_feeder_fsm_current_state)
       FEED_IDLE_STATE:        data_feeder_fsm_next_state = (data_fetcher_trigger) ? FEED_DATA_STATE : FEED_IDLE_STATE;
                                                            
-      FEED_DATA_STATE:        data_feeder_fsm_next_state = (feeded_data_len_q + AxiDataByteLen) > fetch_len ?
+      FEED_DATA_STATE:        data_feeder_fsm_next_state = (feeded_data_len_q + AxiDataByteLen) >= fetch_len ?
                                                            ((fetcher_flit_rdy & fetcher_flit_vld) ? FEED_IDLE_STATE : FEED_DATA_STATE) :
                                                            FEED_DATA_STATE;
                                                            // if feeded all data and the last data is accepeted, finish
@@ -266,7 +266,7 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       router_valid_in[0] = '0;
 
       router_data_in[0]                 = injection_flit;
-      router_valid_in[0][injection_vc]  = 1'b1;
+      router_valid_in[0][injection_vc]  = injection_flit_vld;
       injection_flit_rdy                = router_ready_in[0][injection_vc];
   end
 
@@ -591,9 +591,10 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   );
 
   // AXI writier
-  typedef enum logic [0:0] {
+  typedef enum logic [1:0] {
     WRITE_IDLE_STATE,
-    WRITE_ACTIVE_STATE
+    WRITE_SEND_ADDR_STATE,
+    WRITE_SEND_DATA_STATE
   } axi_writer_fsm_state_t;
 
   logic [AxiAddrWidth:0] axi_writer_addr_d, axi_writer_addr_q;
@@ -606,8 +607,9 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
   // writer fsm state ctrl
   always_comb begin
       case (axi_writer_fsm_current_state)
-          WRITE_IDLE_STATE:       axi_writer_fsm_next_state = (axi_write_reg_vld & axi_write_reg_rdy) ? WRITE_ACTIVE_STATE : WRITE_IDLE_STATE;
-          WRITE_ACTIVE_STATE:     axi_writer_fsm_next_state = (axi_write_reg_vld & axi_write_reg_rdy & axi_write_out_last) ? WRITE_IDLE_STATE : WRITE_ACTIVE_STATE;
+          WRITE_IDLE_STATE:       axi_writer_fsm_next_state = (axi_write_out_vld) ? WRITE_SEND_ADDR_STATE : WRITE_IDLE_STATE;
+          WRITE_SEND_ADDR_STATE:  axi_writer_fsm_next_state = (axi_rsp_i.aw_ready) ? WRITE_SEND_DATA_STATE : WRITE_SEND_ADDR_STATE;
+          WRITE_SEND_DATA_STATE:  axi_writer_fsm_next_state = (axi_write_out_vld & axi_rsp_i.w_ready)  ? (axi_write_out_last ? WRITE_IDLE_STATE :WRITE_SEND_ADDR_STATE) : WRITE_SEND_DATA_STATE;
       endcase
   end
 
@@ -624,23 +626,26 @@ module meshed_serial_link_network import floo_pkg::*; import serial_link_pkg::*;
       axi_req_o.aw.cache  = '0;
       axi_req_o.aw.prot   = '0;
 
-      axi_req_o.aw_valid  = axi_write_out_vld;
+      axi_req_o.aw_valid  = '0;
 
       axi_req_o.w         = '0;
       axi_req_o.w.data    = axi_write_out_data;
       axi_req_o.w.strb    = {AxiDataByteLen{1'b1}};
       axi_req_o.w.last    = 1'b1; // 1 beat per burst
 
-      axi_req_o.w_valid   = 1'b0;
+      axi_req_o.w_valid   = '0;
 
       axi_req_o.b_ready   = 1'b1; // always ready for write rsp
 
       if (axi_writer_fsm_current_state == WRITE_IDLE_STATE) begin
-          axi_writer_addr_d = (axi_write_reg_vld & axi_write_reg_rdy) ? reg2hw_i.meshed_network_data_recv_data.recv_addr.q + AxiDataByteLen : 
-                                                                        reg2hw_i.meshed_network_data_recv_data.recv_addr.q;
-      end else if (axi_writer_fsm_current_state == WRITE_ACTIVE_STATE) begin
-          axi_writer_addr_d = (axi_write_reg_vld & axi_write_reg_rdy) ? axi_writer_addr_q + AxiDataByteLen : 
-                                                                        axi_writer_addr_q;
+          axi_writer_addr_d = reg2hw_i.meshed_network_data_recv_data.recv_addr.q;
+
+      end else if (axi_writer_fsm_current_state == WRITE_SEND_ADDR_STATE) begin
+          axi_req_o.aw_valid = 1'b1;
+          axi_writer_addr_d = (axi_rsp_i.aw_ready) ? axi_writer_addr_q + AxiDataByteLen : 
+                                                     axi_writer_addr_q;
+      end else if (axi_writer_fsm_current_state == WRITE_SEND_DATA_STATE) begin
+          axi_req_o.w_valid = axi_write_out_vld;
       end
   end
 

@@ -193,7 +193,7 @@ module tb_meshed_serial_link;
           .r_chan_t         ( axi_r_chan_t    ),
           .cfg_req_t        ( cfg_req_t       ),
           .cfg_rsp_t        ( cfg_rsp_t       )
-        ) i_serial_link (
+        ) i_meshed_serial_link (
           .clk_i          ( clk_i                         ),
           .rst_ni         ( rst_i_n                       ),
           .clk_sl_i       ( clk_i                         ),
@@ -324,7 +324,7 @@ module tb_meshed_serial_link;
       assert (!resp) else $error("Not able to write cfg reg");
     endtask
 
-    task automatic configure_network_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t data_len, logic [3:0] dst_chip_id);
+    task automatic configure_network_xy_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t data_len, logic [3:0] dst_chip_id);
         automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
 
         logic [RegDataWidth-1:0] register_val;
@@ -338,15 +338,48 @@ module tb_meshed_serial_link;
         cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, register_val);
     endtask
 
+    task automatic configure_network_ring_package (reg_master_t drv, axi_addr_t start_addr, axi_addr_t data_len, logic [3:0] dst_chip_mask, logic traffic_dir);
+        automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
+
+        logic [RegDataWidth-1:0] register_val;
+
+        // config start addr and len
+        register_val = {data_len, start_addr};
+        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_DATA_FETCHER_DATA_OFFSET, register_val);
+
+        // enable ROM, set traffic dir and dst mask
+        register_val = {57'd0, dst_chip_mask, traffic_dir, 1'b1};
+        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_ROM_CTRL_OFFSET, register_val);
+
+        // config dst chip id and trigger
+        register_val  = {63'd0, 1'b1};
+        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_CTRL_OFFSET, register_val);
+    endtask
+
+    task automatic configure_router_id (reg_master_t drv, logic [3:0] xy_id, logic [3:0] ring_id, logic [1:0] ring_up_port, logic [1:0] ring_down_port);
+        automatic axi_addr_t meshed_network_ctrl_reg_offset = serial_link_pkg::linkCtrlRegLen * 4;
+
+        logic [RegDataWidth-1:0] register_val;
+
+        register_val = {52'd0, ring_down_port, ring_up_port, ring_id, xy_id};
+        cfg_write(drv, meshed_network_ctrl_reg_offset + MESHED_NETWORK_CTRL_REGS_MESHED_NETWORK_ID_OFFSET, register_val);
+    endtask
+
 
     initial begin
-        $urandom(1234);
-
-        //init_memory(0, 0, 32);
+        void'($urandom(1234)); // set seed
 
         reg_masters[0].reset_master();
+        reg_masters[1].reset_master();
+        reg_masters[2].reset_master();
+        reg_masters[3].reset_master();
+
+        configure_router_id(reg_masters[0], 0, 0, 4, 3);
+        configure_router_id(reg_masters[1], 1, 0, 3, 2);
+        configure_router_id(reg_masters[2], 2, 3, 1, 4);
+        configure_router_id(reg_masters[3], 3, 2, 2, 1);
         
-        configure_network_package (reg_masters[0], 0, 32, 3);
+        configure_network_ring_package (reg_masters[0], 0, 32, 4'b1110, 1);
     end
 
 endmodule
