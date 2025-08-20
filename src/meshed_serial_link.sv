@@ -5,18 +5,20 @@
 `include "common_cells/registers.svh"
 `include "common_cells/assertions.svh"
 `include "axis/typedef.svh"
+`include "floo_noc/typedef.svh"
 
 // A meshed chiplet inter-chip network. Consist of a netowrk controller and 4 way serial links
 
 module meshed_serial_link import floo_pkg::route_algo_e;#(
   // ring on mesh router
+  parameter int unsigned FlitWidth        = 256,
   parameter int unsigned NumNodes         = 4, // Number of external port
   parameter int unsigned NumRoutes        = 4, // Number of external port
+  parameter int unsigned NumRows          = 2,
+  parameter int unsigned NumColumns       = 2,
   parameter int unsigned NumVirtChannels  = 1,
-  parameter type         flit_t           = logic,
-  parameter type         id_t             = logic[NumRoutes-1:0],
   parameter int unsigned InFifoDepth      = 0,
-  parameter route_algo_e RouteAlgo        = floo_pkg::IdTable,
+  parameter route_algo_e RouteAlgo        = floo_pkg::XYRouting,
   // The number of physical chnannelsc per direction
   parameter int NumChannels       = 5,
   // The number of lanes per channel
@@ -77,6 +79,18 @@ module meshed_serial_link import floo_pkg::route_algo_e;#(
     // synch-reset register
     output logic [3:0]                reset_no
 );
+  // floo noc flit def
+  typedef logic [FlitWidth-1:0] flit_payload_t;
+  typedef logic [$clog2(NumRows)-1:0] y_t;
+  typedef logic [$clog2(NumColumns)-1:0] x_t;
+  typedef logic [1:0] port_id_t;
+  typedef logic [NumNodes-1:0] mask_t;
+
+  `FLOO_TYPEDEF_XY_NODE_ID_T(id_t, x_t, y_t, port_id_t)
+  `FLOO_TYPEDEF_ROM_HDR_T(hdr_t, id_t, id_t, logic, logic, mask_t)
+  `FLOO_TYPEDEF_GENERIC_FLIT_T(req, hdr_t, flit_payload_t)
+
+  localparam type flit_t = floo_req_generic_flit_t;
 
   // meshed network defs
   localparam logic [31:0] linkCtrlRegLen = serial_link_pkg::linkCtrlRegLen;

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: SHL-0.51
 
 package:
-  name: serial_link
+  name: kerberos_serial_link
   authors:
     - "Tim Fischer <fischeti@iis.ee.ethz.ch>"
     - "Manuel Eggimann <meggimann@iis.ee.ethz.ch>"
